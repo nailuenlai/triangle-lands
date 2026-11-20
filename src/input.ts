@@ -7,6 +7,9 @@ export class Input {
   jump = false;
   action = false;
   map = false;
+  /** Held: sprint on ground / dash-swim / dive while gliding. */
+  sprint = false;
+  private sprintBtn = false;
   private look = { x: 0, y: 0 };
   private keys = new Set<string>();
   private joyId: number | null = null;
@@ -61,6 +64,7 @@ export class Input {
     layer.addEventListener('pointercancel', end);
 
     window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
       if (e.repeat) return;
       this.keys.add(e.code);
       if (e.code === 'Space') this.jump = true;
@@ -68,11 +72,26 @@ export class Input {
       if (e.code === 'KeyM' || e.code === 'Tab') { this.map = true; e.preventDefault(); }
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => this.keys.clear());
+    window.addEventListener('blur', () => { this.keys.clear(); this.sprintBtn = false; });
   }
 
   bindButton(el: HTMLElement, fn: () => void) {
     el.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); fn(); });
+  }
+
+  /** A press-and-hold button (touch sprint). */
+  bindHold(el: HTMLElement, onDown?: () => void) {
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      el.setPointerCapture(e.pointerId);
+      this.sprintBtn = true;
+      el.classList.add('held');
+      onDown?.();
+    });
+    const up = () => { this.sprintBtn = false; el.classList.remove('held'); };
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+    el.addEventListener('lostpointercapture', up);
   }
 
   consumeLook() {
@@ -91,6 +110,7 @@ export class Input {
     const len = Math.hypot(x, y);
     if (len > 1) { x /= len; y /= len; }
     this.move = { x, y };
+    this.sprint = this.sprintBtn || k.has('ShiftLeft') || k.has('ShiftRight');
     if (len > 0.1 && this.onFirstMove) { this.onFirstMove(); this.onFirstMove = null; }
   }
 

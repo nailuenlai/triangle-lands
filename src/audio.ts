@@ -12,6 +12,8 @@ export interface AudioEnv {
   grounded: boolean;
   onStone: boolean;
   aerial: boolean;        // true during high-altitude vista / resonance camera
+  glide: number;          // 0 .. 1 paraglider airspeed (0 when not gliding)
+  climbing: boolean;
 }
 
 // D major pentatonic frequencies for calm, open-air ambient tones
@@ -213,10 +215,10 @@ export class NatureAudio {
     // Natural irregular wind gusts
     const gust = 0.5 + 0.3 * Math.sin(this.t * 0.34) + 0.2 * Math.sin(this.t * 0.13 + 1.7);
     const highFactor = Math.min(1, Math.max(0, (env.altitude - 18) / 42)) + (env.aerial ? 0.55 : 0);
-    const breezeFreq = 250 + gust * 190 + highFactor * 160 + env.speed * 70;
-    const breezeVol = 0.042 + gust * 0.045 + highFactor * 0.04 + env.speed * 0.018;
+    const breezeFreq = 250 + gust * 190 + highFactor * 160 + env.speed * 70 + env.glide * 520;
+    const breezeVol = 0.042 + gust * 0.045 + highFactor * 0.04 + env.speed * 0.018 + env.glide * 0.11;
     this.breezeFilter.frequency.setTargetAtTime(breezeFreq, now, 0.25);
-    this.breezeGain.gain.setTargetAtTime(Math.min(0.16, breezeVol), now, 0.25);
+    this.breezeGain.gain.setTargetAtTime(Math.min(0.26, breezeVol), now, 0.25);
 
     // Rustling leaves (strongest in lowland/midland forests, quieter high up or in water)
     const treeZone = env.swimming ? 0.15 : Math.max(0.15, 1 - Math.max(0, (env.altitude - 38) / 28));
@@ -231,11 +233,11 @@ export class NatureAudio {
     this.waterGain.gain.setTargetAtTime(waterVol, now, 0.25);
 
     // Soft footsteps while moving
-    if (env.speed > 0.12 && (env.grounded || env.swimming) && !env.aerial) {
-      this.stepDist += dt * env.speed * (env.swimming ? 1.4 : 2.65);
+    if (env.speed > 0.12 && (env.grounded || env.swimming || env.climbing) && !env.aerial) {
+      this.stepDist += dt * env.speed * (env.swimming ? 1.4 : env.climbing ? 2.0 : 2.65);
       if (this.stepDist >= 1) {
         this.stepDist -= 1;
-        this.playStep(env.swimming, env.onStone);
+        this.playStep(env.swimming, env.onStone || env.climbing);
       }
     } else {
       this.stepDist = 0.65;
@@ -472,4 +474,129 @@ export class NatureAudio {
     g.connect(this.master);
     src.start(now, Math.random() * 4, 0.18);
   }
+
+  // ------------------------------------------------------------ Movement & reward SFX
+  private ready(): AudioContext | null {
+    if (!this.ctx || this._muted || this.ctx.state !== 'running') return null;
+    return this.ctx;
+  }
+
+  private noiseBurst(
+    type: BiquadFilterType, f0: number, f1: number, q: number,
+    peak: number, dur: number, attack = 0.01, delay = 0,
+  ) {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const now = ctx.currentTime + delay;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    const flt = ctx.createBiquadFilter();
+    flt.type = type;
+    flt.frequency.setValueAtTime(f0, now);
+    flt.frequency.exponentialRampToValueAtTime(Math.max(20, f1), now + dur);
+    flt.Q.value = q;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.linearRampToValueAtTime(peak, now + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    src.connect(flt); flt.connect(g); g.connect(this.master);
+    src.start(now, Math.random() * 5, dur + 0.05);
+  }
+
+  private bell(freq: number, delay: number, peak: number, dur = 1.6) {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const start = ctx.currentTime + delay;
+    const osc = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const g = ctx.createGain();
+    const g2 = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    osc2.type = 'sine';
+    osc2.frequency.value = freq * 2.76; // inharmonic bell partial
+    g.gain.setValueAtTime(0.0001, start);
+    g.gain.linearRampToValueAtTime(peak, start + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+    g2.gain.setValueAtTime(0.0001, start);
+    g2.gain.linearRampToValueAtTime(peak * 0.35, start + 0.004);
+    g2.gain.exponentialRampToValueAtTime(0.0001, start + dur * 0.35);
+    osc.connect(g); osc2.connect(g2);
+    const dry = ctx.createGain();
+    dry.gain.value = 0.7;
+    g.connect(dry); g2.connect(dry);
+    dry.connect(this.master);
+    g.connect(this.reverb); g2.connect(this.reverb);
+    osc.start(start); osc2.start(start);
+    osc.stop(start + dur + 0.05); osc2.stop(start + dur + 0.05);
+  }
+
+  playJump() { this.noiseBurst('bandpass', 380, 1100, 1.2, 0.05, 0.16, 0.01); }
+
+  playGlideOpen() {
+    this.noiseBurst('bandpass', 260, 700, 0.9, 0.09, 0.12, 0.005);
+    this.noiseBurst('bandpass', 420, 1300, 0.9, 0.08, 0.16, 0.005, 0.07);
+    this.bell(659.25, 0.02, 0.018, 0.8);
+  }
+
+  playGlideClose() { this.noiseBurst('bandpass', 900, 380, 1.0, 0.06, 0.14, 0.005); }
+
+  playLand(impact: number) {
+    const k = Math.min(1, impact / 30);
+    if (k < 0.15) return;
+    this.noiseBurst('lowpass', 420, 90, 0.7, 0.05 + k * 0.12, 0.18 + k * 0.2, 0.004);
+  }
+
+  playSplash(impact: number) {
+    const k = Math.min(1, impact / 25);
+    this.noiseBurst('bandpass', 1400, 380, 0.8, 0.06 + k * 0.1, 0.45 + k * 0.3, 0.01);
+    this.noiseBurst('lowpass', 500, 120, 0.6, 0.05 + k * 0.08, 0.35, 0.005);
+  }
+
+  playGrab() { this.noiseBurst('bandpass', 1500, 700, 2.0, 0.05, 0.1, 0.004); }
+
+  playLeap() {
+    this.noiseBurst('bandpass', 700, 1600, 1.4, 0.05, 0.2, 0.01);
+    this.noiseBurst('bandpass', 1300, 900, 2.0, 0.035, 0.08, 0.003);
+  }
+
+  /** Orb pick-up: rising pentatonic bell that climbs with combo chains. */
+  playOrb(combo: number) {
+    const idx = Math.min(PENTA.length - 1, combo % PENTA.length);
+    const oct = combo >= PENTA.length ? 2 : 1;
+    this.bell(PENTA[idx] * 2 * oct, 0, 0.05, 1.4);
+    this.bell(PENTA[Math.min(PENTA.length - 1, idx + 2)] * 2 * oct, 0.07, 0.03, 1.2);
+  }
+
+  playRing(i: number) {
+    const f = PENTA[Math.min(PENTA.length - 1, i)] * 2;
+    this.bell(f, 0, 0.05, 1.3);
+    this.noiseBurst('highpass', 3000, 6000, 0.7, 0.02, 0.25, 0.01);
+  }
+
+  playCourseDone() {
+    [587.33, 739.99, 880, 1174.66, 1479.98].forEach((f, i) => this.bell(f, i * 0.09, 0.05, 2.2));
+    const ctx = this.ready();
+    if (ctx) [146.83, 220].forEach((f) => this.softTone(ctx, ctx.currentTime, f, 3.2, 0.04));
+  }
+
+  playCourseFail() {
+    this.bell(440, 0, 0.03, 0.9);
+    this.bell(369.99, 0.14, 0.03, 1.1);
+  }
+
+  playExhausted() {
+    const ctx = this.ready();
+    if (ctx) this.softTone(ctx, ctx.currentTime, 185, 1.2, 0.05);
+    this.noiseBurst('bandpass', 900, 500, 1.5, 0.03, 0.35, 0.05);
+  }
+
+  playUpgrade() {
+    const ctx = this.ready();
+    if (!ctx) return;
+    [293.66, 369.99, 440, 587.33, 739.99, 880].forEach((f, i) => this.softTone(ctx, ctx.currentTime + i * 0.07, f, 3, 0.035));
+    this.bell(1760, 0.45, 0.025, 2);
+  }
+
+  playUpdraft() { this.noiseBurst('bandpass', 300, 1400, 0.8, 0.07, 0.9, 0.25); }
 }
