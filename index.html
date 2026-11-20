@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#cfe3ea" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="description" content="三角之境：一款以地形探索為核心的低多邊形 3D 網頁遊戲。漫步山野、尋訪隱於霧中的古碑、靜心共鳴描繪大地之貌。" />
+    <meta name="description" content="三角之境：一款以地形探索為核心的低多邊形 3D 網頁遊戲。攀岩、滑翔、乘上升氣流、挑戰風之試煉、收集靈光，尋訪隱於霧中的古碑。" />
     <title>三角之境 · Triangle Lands</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -15,18 +15,25 @@
       href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&display=swap"
       rel="stylesheet"
     />
-    <script type="module" crossorigin src="./assets/index-D8E30OuJ.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-CvFVAtAl.css">
+    <script type="module" crossorigin src="./assets/index-CSR13hSV.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-Bg5m9Tzs.css">
   </head>
   <body>
     <canvas id="scene" aria-label="遊戲畫面"></canvas>
     <div id="touch-layer"></div>
 
+    <div id="speedlines" class="speedlines" aria-hidden="true"></div>
     <div id="hud" hidden>
       <div class="hud-top">
-        <div class="pill tower-count" title="已共鳴的古碑">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.6 3.5L12 9 9.4 5.5zM7 21l2.4-10h5.2L17 21z" /></svg>
-          <span id="tower-count-num">0</span><span class="of">/ 6</span>
+        <div class="hud-left">
+          <div class="pill tower-count" title="已共鳴的古碑">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.6 3.5L12 9 9.4 5.5zM7 21l2.4-10h5.2L17 21z" /></svg>
+            <span id="tower-count-num">0</span><span class="of">/ 6</span>
+          </div>
+          <div id="orb-count" class="pill orb-count" title="收集的靈光">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8.5 15h-17z" /></svg>
+            <span id="orb-count-num">0</span><span id="orb-count-total" class="of">/ 0</span>
+          </div>
         </div>
         <div class="compass" aria-hidden="true">
           <div id="compass-strip" class="compass-strip"></div>
@@ -49,6 +56,17 @@
         </div>
       </div>
 
+      <div id="trial" class="trial" aria-live="polite">
+        <div class="trial-head"><span id="trial-name"></span><b id="trial-count"></b></div>
+        <div class="trial-track"><div id="trial-bar" class="trial-bar"></div></div>
+      </div>
+
+      <div id="stamina" class="stamina" aria-hidden="true">
+        <svg><circle id="stamina-bg" class="st-bg" /><circle id="stamina-fg" class="st-fg" /></svg>
+      </div>
+      <div id="float-layer" class="float-layer" aria-hidden="true"></div>
+      <div id="glide-hint" class="glide-hint"></div>
+
       <div id="joystick" class="joystick"><div id="joy-knob" class="joy-knob"></div></div>
 
       <div class="hud-actions">
@@ -56,15 +74,20 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l4.5 6.5L12 16 7.5 9.5zM5 19.5c2.2-1.6 4.5-2.4 7-2.4s4.8.8 7 2.4" /></svg>
           <span id="btn-interact-label">共鳴</span>
         </button>
-        <button id="btn-jump" class="action-btn jump" aria-label="跳躍">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 15l7-7 7 7" /></svg>
-        </button>
+        <div class="action-row">
+          <button id="btn-sprint" class="action-btn sprint" aria-label="衝刺（按住）">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7l5 5-5 5M12 7l5 5-5 5" /></svg>
+          </button>
+          <button id="btn-jump" class="action-btn jump" aria-label="跳躍 / 滑翔">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 15l7-7 7 7" /></svg>
+          </button>
+        </div>
       </div>
 
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
       <div id="hint" class="hint">
-        <span class="touch-only">左側拖曳移動 · 右側拖曳轉動視角</span>
-        <span class="desk-only">WASD 移動 · 滑鼠拖曳視角 · 空白鍵跳躍 · E 共鳴 · M 地圖</span>
+        <span class="touch-only">左側拖曳移動 · 右側拖曳視角 · 推向岩壁即可攀爬 · 空中再按跳躍滑翔</span>
+        <span class="desk-only">WASD 移動 · Shift 衝刺 · 空白鍵跳躍／空中展開滑翔翼 · 推向岩壁攀爬 · E 共鳴 · M 地圖</span>
       </div>
     </div>
 
@@ -83,7 +106,7 @@
       <div class="title-inner">
         <p class="eyebrow">Triangle Lands</p>
         <h1>三角之境</h1>
-        <p class="lede">漫步山野，尋訪隱於霧中的古碑。<br />靜心共鳴，描繪大地之貌。</p>
+        <p class="lede">攀上群峰，乘風滑翔，追逐金色靈光。<br />尋訪隱於霧中的古碑，描繪大地之貌。</p>
         <div class="title-actions">
           <button id="btn-start" class="btn-primary">開始探索</button>
           <button id="btn-reset" class="btn-ghost" hidden>重置進度</button>
