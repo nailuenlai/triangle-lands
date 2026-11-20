@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Cpath d=%22M16 3 30 28H2z%22 fill=%22%234fe3ff%22/%3E%3C/svg%3E" />
+    <meta name="theme-color" content="#cfe3ea" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="description" content="三角之境：一款以地形探索為核心的低多邊形 3D 網頁遊戲。翻過山丘、看見遠方的光芒、登上高塔揭開地圖。" />
+    <title>三角之境 · Triangle Lands</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&display=swap&text=三角之境登上高塔揭開地圖翻過山丘看見下一個遠方繼續開始探索重置進度已點亮座初始西嶺東崖南湖霧林北境TriangleLands0123456789/"
+      rel="stylesheet"
+    />
+    <script type="module" crossorigin src="./assets/index-BeQcQYvH.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-DtEaXo_T.css">
+  </head>
+  <body>
+    <canvas id="scene" aria-label="遊戲畫面"></canvas>
+    <div id="touch-layer"></div>
+
+    <div id="hud" hidden>
+      <div class="hud-top">
+        <div class="pill tower-count" title="已點亮的高塔">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l3 4h-2l2 16H9l2-16H9z" /></svg>
+          <span id="tower-count-num">0</span><span class="of">/ 6</span>
+        </div>
+        <div class="compass" aria-hidden="true">
+          <div id="compass-strip" class="compass-strip"></div>
+          <div class="compass-needle"></div>
+        </div>
+        <button id="btn-map" class="pill icon-btn" aria-label="開啟地圖">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2zM9 4v14M15 6v14" /></svg>
+        </button>
+      </div>
+
+      <div id="joystick" class="joystick"><div id="joy-knob" class="joy-knob"></div></div>
+
+      <div class="hud-actions">
+        <button id="btn-climb" class="action-btn climb" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l6 7h-4v9h-4v-9H6z" /></svg>
+          <span id="btn-climb-label">攀爬</span>
+        </button>
+        <button id="btn-jump" class="action-btn jump" aria-label="跳躍">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 15l7-7 7 7" /></svg>
+        </button>
+      </div>
+
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      <div id="hint" class="hint">
+        <span class="touch-only">左側拖曳移動 · 右側拖曳轉動視角</span>
+        <span class="desk-only">WASD 移動 · 滑鼠拖曳視角 · 空白鍵跳躍 · E 攀爬 · M 地圖</span>
+      </div>
+    </div>
+
+    <div id="map-overlay" class="map-overlay" hidden>
+      <div class="map-sheet">
+        <header class="map-head">
+          <h2>大地圖</h2>
+          <p id="map-progress"></p>
+        </header>
+        <canvas id="map-canvas" class="map-canvas"></canvas>
+        <button id="btn-map-close" class="map-close" aria-label="關閉地圖">關閉</button>
+      </div>
+    </div>
+
+    <section id="title-screen" class="title-screen">
+      <div class="title-inner">
+        <p class="eyebrow">Triangle Lands</p>
+        <h1>三角之境</h1>
+        <p class="lede">翻過山丘，看見下一個遠方。<br />登上高塔，揭開地圖。</p>
+        <div class="title-actions">
+          <button id="btn-start" class="btn-primary">開始探索</button>
+          <button id="btn-reset" class="btn-ghost" hidden>重置進度</button>
+        </div>
+      </div>
+    </section>
+
+  </body>
+</html>
