@@ -1,21 +1,20 @@
 import * as THREE from 'three';
-import { Terrain, SEG, HALF, WATER_LEVEL, WORLD_SIZE } from './terrain';
+import { Terrain, SEG, HALF, WATER_LEVEL, WORLD_SIZE, smoothstep } from './terrain';
 import { mulberry32, Simplex2 } from './noise';
 
-export const TOWER_H = 34;
 export const REVEAL_RADIUS = 150;
 export const START_POS = { x: 10, z: 70 };
 
 export interface TowerDef { name: string; x: number; z: number; }
 
-/** Hand-placed landmarks. Spread so each tower's summit shows the next beacon. */
+/** Hand-placed ancient shrines nestled across distinct regions of the island. */
 export const TOWER_DEFS: TowerDef[] = [
-  { name: '初始之塔', x: 0, z: -95 },
-  { name: '西嶺之塔', x: -195, z: -40 },
-  { name: '東崖之塔', x: 175, z: -140 },
-  { name: '南湖之塔', x: 150, z: 150 },
-  { name: '霧林之塔', x: -130, z: 185 },
-  { name: '北境之塔', x: -20, z: -235 },
+  { name: '初始之碑', x: 0, z: -95 },
+  { name: '西嶺之碑', x: -195, z: -40 },
+  { name: '東崖之碑', x: 175, z: -140 },
+  { name: '南湖之碑', x: 150, z: 150 },
+  { name: '霧林之碑', x: -130, z: 185 },
+  { name: '北境之碑', x: -20, z: -235 },
 ];
 
 export const COLORS = {
@@ -244,14 +243,14 @@ export function createClouds(): THREE.Group {
   return g;
 }
 
-// ---------------------------------------------------------------- Towers
+// ---------------------------------------------------------------- Ancient Resonance Shrines
 function radialTexture(): THREE.Texture {
   const cv = document.createElement('canvas');
   cv.width = cv.height = 128;
   const ctx = cv.getContext('2d')!;
   const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
   g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+  g.addColorStop(0.28, 'rgba(255,255,255,0.48)');
   g.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 128, 128);
@@ -265,80 +264,133 @@ export class Tower {
   readonly group = new THREE.Group();
   readonly base: number;
   readonly top: number;
+  readonly pillars: { x: number; z: number; r: number }[] = [];
   discovered = false;
   activated = false;
+
+  private stoneMat: THREE.MeshLambertMaterial;
+  private darkMat: THREE.MeshLambertMaterial;
+  private mossMat: THREE.MeshLambertMaterial;
+  private runeMat: THREE.MeshBasicMaterial;
   private crystal: THREE.Mesh;
   private crystalMat: THREE.MeshBasicMaterial;
+  private haloA: THREE.Mesh;
+  private haloB: THREE.Mesh;
+  private haloMat: THREE.MeshBasicMaterial;
   private glow: THREE.Sprite;
-  private beamMat: THREE.ShaderMaterial;
+  private wisp: THREE.Mesh;
+  private wispMat: THREE.ShaderMaterial;
+  private motes: { mesh: THREE.Mesh; phase: number; radius: number; speed: number }[] = [];
+  private moteMat: THREE.MeshBasicMaterial;
   private ring: THREE.Mesh;
   private ringT = -1;
+  private awakenBoost = 0;
 
   constructor(public def: TowerDef, public index: number, baseY: number) {
     this.base = baseY;
-    this.top = baseY + TOWER_H + 0.4;
-    const stone = new THREE.MeshLambertMaterial({ color: '#77716a', flatShading: true });
-    const dark = new THREE.MeshLambertMaterial({ color: '#4d4a46', flatShading: true });
+    this.top = baseY + 0.82; // walkable altar surface height
     this.group.position.set(def.x, baseY, def.z);
 
-    const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(6, 7, 1.5, 8), dark);
-    pedestal.position.y = 0.75;
-    this.group.add(pedestal);
+    this.stoneMat = new THREE.MeshLambertMaterial({ color: '#7f7d72', flatShading: true });
+    this.darkMat = new THREE.MeshLambertMaterial({ color: '#585850', flatShading: true });
+    this.mossMat = new THREE.MeshLambertMaterial({ color: '#697a54', flatShading: true });
+    this.runeMat = new THREE.MeshBasicMaterial({
+      color: COLORS.inactive.clone(), transparent: true, opacity: 0.85, side: THREE.DoubleSide,
+    });
 
-    // Four splayed legs.
-    const legGeo = new THREE.BoxGeometry(0.8, 0.8, 1);
-    const corners = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
-    for (const [sx, sz] of corners) {
-      const a = new THREE.Vector3(sx * 4.2, 0, sz * 4.2);
-      const b = new THREE.Vector3(sx * 2.2, TOWER_H, sz * 2.2);
-      const leg = new THREE.Mesh(legGeo, stone);
-      leg.position.copy(a).add(b).multiplyScalar(0.5);
-      leg.scale.z = a.distanceTo(b);
-      leg.lookAt(b.clone().add(this.group.position));
-      this.group.add(leg);
-    }
-    // Ring frames.
-    for (let k = 1; k <= 4; k++) {
-      const y = (TOWER_H * k) / 5;
-      const half = 4.2 - (2.0 * y) / TOWER_H;
-      for (let side = 0; side < 4; side++) {
-        const bar = new THREE.Mesh(new THREE.BoxGeometry(half * 2 + 0.8, 0.5, 0.5), dark);
-        const ang = (side * Math.PI) / 2;
-        bar.position.set(Math.sin(ang) * half, y, Math.cos(ang) * half);
-        bar.rotation.y = ang;
-        this.group.add(bar);
-      }
-    }
-    // Central spine.
-    const spine = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.4, TOWER_H, 6), dark);
-    spine.position.y = TOWER_H / 2;
-    this.group.add(spine);
-    // Platform.
-    const plat = new THREE.Mesh(new THREE.CylinderGeometry(4.6, 3.8, 0.8, 8), stone);
-    plat.position.y = TOWER_H;
-    this.group.add(plat);
+    // Two-tier walkable stepped stone circle
+    const outerTerrace = new THREE.Mesh(new THREE.CylinderGeometry(5.5, 6.4, 0.42, 9), this.mossMat);
+    outerTerrace.position.y = 0.21;
+    const innerDais = new THREE.Mesh(new THREE.CylinderGeometry(3.65, 4.3, 0.42, 9), this.stoneMat);
+    innerDais.position.y = 0.62;
+    this.group.add(outerTerrace, innerDais);
 
-    this.crystalMat = new THREE.MeshBasicMaterial({ color: COLORS.inactive.clone(), fog: false });
-    this.crystal = new THREE.Mesh(new THREE.OctahedronGeometry(1.4, 0), this.crystalMat);
-    this.crystal.position.y = TOWER_H + 3.2;
-    this.crystal.scale.y = 1.6;
+    // Engraved floor rune circle & sacred triangle
+    const floorRing = new THREE.Mesh(new THREE.RingGeometry(2.62, 2.82, 36), this.runeMat);
+    floorRing.rotation.x = -Math.PI / 2;
+    floorRing.position.y = 0.85;
+    const floorTri = new THREE.Mesh(new THREE.RingGeometry(1.55, 1.72, 3), this.runeMat);
+    floorTri.rotation.x = -Math.PI / 2;
+    floorTri.rotation.z = index * 0.5;
+    floorTri.position.y = 0.855;
+    this.group.add(floorRing, floorTri);
+
+    // Three tilted weathered monoliths arranged in a triangle
+    const heights = [5.3, 6.1, 5.65];
+    const baseAngle = index * 0.7 + 0.35;
+    const pillarR = 3.15;
+    for (let k = 0; k < 3; k++) {
+      const ang = baseAngle + (k * Math.PI * 2) / 3;
+      const px = Math.sin(ang) * pillarR;
+      const pz = Math.cos(ang) * pillarR;
+      const h = heights[k];
+
+      const holder = new THREE.Group();
+      holder.position.set(px, 0.75, pz);
+      holder.rotation.y = ang + Math.PI; // +Z faces center of shrine
+      holder.rotation.x = 0.14;          // subtle inward lean
+
+      const slabGeo = new THREE.CylinderGeometry(0.34, 0.66, h, 5);
+      slabGeo.scale(1.18, 1, 0.74);
+      slabGeo.translate(0, h / 2, 0);
+      const slab = new THREE.Mesh(slabGeo, k === 1 ? this.darkMat : this.stoneMat);
+      holder.add(slab);
+
+      // Glowing vertical rune strip inlaid on the inner face
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(0.11, h * 0.56, 0.06), this.runeMat);
+      strip.position.set(0, h * 0.48, 0.36);
+      strip.rotation.x = -0.05;
+      holder.add(strip);
+
+      this.group.add(holder);
+      this.pillars.push({ x: def.x + px, z: def.z + pz, r: 0.85 });
+    }
+
+    // Central carved altar plinth
+    const plinth = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.98, 1.28, 6), this.darkMat);
+    plinth.position.y = 0.82 + 0.64;
+    this.group.add(plinth);
+    this.pillars.push({ x: def.x, z: def.z, r: 1.15 });
+
+    // Floating triangular crystal core
+    this.crystalMat = new THREE.MeshBasicMaterial({
+      color: COLORS.inactive.clone(), transparent: true, opacity: 1,
+    });
+    this.crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.76, 0), this.crystalMat);
+    this.crystal.position.y = 3.55;
+    this.crystal.scale.set(0.95, 1.65, 0.95);
     this.group.add(this.crystal);
 
+    // Interlocking resonance rings around the crystal
+    this.haloMat = new THREE.MeshBasicMaterial({
+      color: COLORS.inactive.clone(), transparent: true, opacity: 0.72,
+    });
+    this.haloA = new THREE.Mesh(new THREE.TorusGeometry(1.28, 0.045, 5, 24), this.haloMat);
+    this.haloB = new THREE.Mesh(new THREE.TorusGeometry(1.62, 0.036, 5, 24), this.haloMat);
+    this.haloA.position.y = 3.55;
+    this.haloB.position.y = 3.55;
+    this.group.add(this.haloA, this.haloB);
+
+    // Soft ambient radial glow
     glowTex ??= radialTexture();
     this.glow = new THREE.Sprite(new THREE.SpriteMaterial({
       map: glowTex, color: COLORS.inactive.clone(), blending: THREE.AdditiveBlending,
-      depthWrite: false, fog: false, transparent: true,
+      depthWrite: false, transparent: true, opacity: 0.85,
     }));
-    this.glow.scale.setScalar(14);
-    this.glow.position.y = TOWER_H + 3.2;
+    this.glow.scale.setScalar(7.5);
+    this.glow.position.y = 3.55;
     this.group.add(this.glow);
 
-    // Beam of light: the long-range lure. Depth-tested, so ridges hide it.
-    const beamGeo = new THREE.CylinderGeometry(1.1, 1.1, 90, 12, 1, true);
-    beamGeo.translate(0, 45, 0);
-    this.beamMat = new THREE.ShaderMaterial({
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
-      uniforms: { color: { value: COLORS.inactive.clone() }, time: { value: 0 } },
+    // Gentle low spirit wisp (only ~13m high, never a sky-piercing beacon)
+    const wispGeo = new THREE.CylinderGeometry(0.18, 1.05, 13, 12, 1, true);
+    wispGeo.translate(0, 6.5, 0);
+    this.wispMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      uniforms: {
+        color: { value: COLORS.inactive.clone() },
+        time: { value: 0 },
+        fade: { value: 0 },
+      },
       vertexShader: /* glsl */ `
         varying vec2 vUv; varying vec3 vN; varying vec3 vV;
         void main() {
@@ -349,27 +401,47 @@ export class Tower {
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: /* glsl */ `
-        uniform vec3 color; uniform float time;
+        uniform vec3 color; uniform float time; uniform float fade;
         varying vec2 vUv; varying vec3 vN; varying vec3 vV;
         void main() {
-          float f = pow(abs(dot(normalize(vN), normalize(vV))), 1.5);
-          float a = pow(1.0 - vUv.y, 1.4) * f * (0.55 + 0.12 * sin(time * 2.0 + vUv.y * 8.0));
+          float f = pow(abs(dot(normalize(vN), normalize(vV))), 1.6);
+          float wave = 0.72 + 0.28 * sin(time * 1.8 - vUv.y * 6.0);
+          float a = pow(1.0 - vUv.y, 1.9) * smoothstep(0.0, 0.15, vUv.y) * f * wave * 0.42 * fade;
           gl_FragColor = vec4(color, a);
           #include <colorspace_fragment>
         }`,
     });
-    const beam = new THREE.Mesh(beamGeo, this.beamMat);
-    beam.position.y = TOWER_H + 3;
-    beam.frustumCulled = false;
-    this.group.add(beam);
+    this.wisp = new THREE.Mesh(wispGeo, this.wispMat);
+    this.wisp.position.y = 2.6;
+    this.group.add(this.wisp);
 
-    // Activation pulse ring.
+    // Drifting firefly-like light motes rising around the altar
+    this.moteMat = new THREE.MeshBasicMaterial({
+      color: COLORS.inactive.clone(), transparent: true, opacity: 0.85,
+    });
+    const moteGeo = new THREE.OctahedronGeometry(0.09, 0);
+    const rand = mulberry32(101 + index * 37);
+    for (let m = 0; m < 10; m++) {
+      const mesh = new THREE.Mesh(moteGeo, this.moteMat);
+      this.group.add(mesh);
+      this.motes.push({
+        mesh,
+        phase: rand() * Math.PI * 2,
+        radius: 1.2 + rand() * 2.4,
+        speed: 0.35 + rand() * 0.4,
+      });
+    }
+
+    // Resonance pulse wave across the terrain
     this.ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.9, 1, 48),
-      new THREE.MeshBasicMaterial({ color: COLORS.active, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false, fog: false, blending: THREE.AdditiveBlending }),
+      new THREE.RingGeometry(0.88, 1, 48),
+      new THREE.MeshBasicMaterial({
+        color: COLORS.active, transparent: true, opacity: 0,
+        side: THREE.DoubleSide, depthWrite: false, fog: false, blending: THREE.AdditiveBlending,
+      }),
     );
     this.ring.rotation.x = -Math.PI / 2;
-    this.ring.position.y = TOWER_H + 1;
+    this.ring.position.y = 1.05;
     this.ring.visible = false;
     this.group.add(this.ring);
   }
@@ -378,31 +450,96 @@ export class Tower {
     this.activated = v;
     const col = v ? COLORS.active : COLORS.inactive;
     this.crystalMat.color.copy(col);
+    this.runeMat.color.copy(col);
+    this.haloMat.color.copy(col);
+    this.moteMat.color.copy(col);
     this.glow.material.color.copy(col);
-    (this.beamMat.uniforms.color.value as THREE.Color).copy(col);
+    (this.wispMat.uniforms.color.value as THREE.Color).copy(col);
   }
 
-  pulse() { this.ringT = 0; this.ring.visible = true; }
+  pulse() {
+    this.ringT = 0;
+    this.ring.visible = true;
+    this.awakenBoost = 1;
+  }
 
-  update(t: number, dt: number, camPos?: THREE.Vector3) {
-    this.crystal.rotation.y = t * 0.8;
-    this.crystal.position.y = TOWER_H + 3.2 + Math.sin(t * 1.5 + this.index) * 0.3;
-    this.glow.position.y = this.crystal.position.y;
-    if (camPos) {
-      // Fade the crystal when the camera is near so it never blocks the summit view.
-      const d = Math.hypot(camPos.x - this.def.x, camPos.y - (this.base + this.crystal.position.y), camPos.z - this.def.z);
-      const o = Math.min(1, Math.max(0.08, (d - 8) / 14));
-      this.crystalMat.opacity = o;
-      this.crystalMat.transparent = o < 1;
-      this.glow.material.opacity = o;
+  update(t: number, dt: number, playerPos: THREE.Vector3, inTitle = false) {
+    const dist = Math.hypot(playerPos.x - this.def.x, playerPos.z - this.def.z);
+
+    // Proximity emergence: hidden in distant wilderness, materializing out of the mist up close
+    const stoneFade = inTitle && !this.activated
+      ? 0
+      : this.activated
+        ? smoothstep(185, 128, dist)
+        : smoothstep(116, 76, dist);
+
+    const glowFade = inTitle && !this.activated
+      ? 0
+      : this.activated
+        ? smoothstep(155, 92, dist)
+        : smoothstep(96, 52, dist);
+
+    this.group.visible = stoneFade > 0.005 || this.ringT >= 0;
+    if (!this.group.visible) return;
+
+    for (const m of [this.stoneMat, this.darkMat, this.mossMat]) {
+      m.transparent = stoneFade < 0.995;
+      m.opacity = stoneFade;
+      m.depthWrite = stoneFade > 0.45;
     }
-    this.beamMat.uniforms.time.value = t;
+
+    const nearBoost = smoothstep(12, 4, dist);
+    this.awakenBoost = Math.max(0, this.awakenBoost - dt * 0.45);
+    const spin = 0.65 + nearBoost * 0.9 + this.awakenBoost * 2.8 + (this.activated ? 0.35 : 0);
+
+    const cy = 3.55 + Math.sin(t * 1.6 + this.index) * 0.22 + this.awakenBoost * 0.45;
+    this.crystal.rotation.y += dt * spin;
+    this.crystal.position.y = cy;
+
+    this.haloA.position.y = cy;
+    this.haloB.position.y = cy;
+    this.haloA.rotation.x = 0.65 + Math.sin(t * 0.7 + this.index) * 0.25;
+    this.haloA.rotation.y = t * (0.5 * spin);
+    this.haloB.rotation.x = -0.55 + Math.cos(t * 0.55 + this.index) * 0.25;
+    this.haloB.rotation.z = t * (0.38 * spin);
+
+    this.glow.position.y = cy;
+    this.glow.scale.setScalar(6.8 + nearBoost * 1.8 + this.awakenBoost * 4.0);
+
+    const lumVisible = glowFade > 0.005;
+    this.crystal.visible = lumVisible;
+    this.haloA.visible = lumVisible;
+    this.haloB.visible = lumVisible;
+    this.glow.visible = lumVisible;
+    this.wisp.visible = lumVisible;
+
+    this.crystalMat.opacity = glowFade * 0.95;
+    this.haloMat.opacity = glowFade * (0.55 + nearBoost * 0.3);
+    this.runeMat.opacity = stoneFade * (0.25 + glowFade * 0.7);
+    this.glow.material.opacity = glowFade * (0.65 + nearBoost * 0.25);
+    this.moteMat.opacity = glowFade * 0.85;
+
+    this.wispMat.uniforms.time.value = t;
+    this.wispMat.uniforms.fade.value = glowFade * (this.activated ? 0.75 : 1.0);
+
+    for (let i = 0; i < this.motes.length; i++) {
+      const m = this.motes[i];
+      m.mesh.visible = lumVisible;
+      if (!lumVisible) continue;
+      const p = ((t * m.speed + m.phase) % (Math.PI * 2)) / (Math.PI * 2); // 0..1
+      const ang = m.phase + t * 0.35 + p * 1.8;
+      const r = m.radius * (1 - p * 0.35);
+      m.mesh.position.set(Math.cos(ang) * r, 1.0 + p * 5.6, Math.sin(ang) * r);
+      const s = Math.sin(p * Math.PI) * (0.8 + nearBoost * 0.5);
+      m.mesh.scale.setScalar(Math.max(0.01, s));
+    }
+
     if (this.ringT >= 0) {
       this.ringT += dt;
-      const k = this.ringT / 2.4;
-      const s = 2 + k * 160;
+      const k = this.ringT / 2.5;
+      const s = 2 + k * 155;
       this.ring.scale.setScalar(s);
-      (this.ring.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 1 - k) * 0.9;
+      (this.ring.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 1 - k) * 0.88;
       if (k >= 1) { this.ringT = -1; this.ring.visible = false; }
     }
   }

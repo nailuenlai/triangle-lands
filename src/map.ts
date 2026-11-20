@@ -71,6 +71,37 @@ export class GameMap {
     v.addColorStop(1, 'rgba(120,90,50,0.28)');
     ctx.fillStyle = v;
     ctx.fillRect(0, 0, RES, RES);
+
+    // Subtle vintage cartographic border
+    ctx.strokeStyle = 'rgba(78, 58, 34, 0.28)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(14, 14, RES - 28, RES - 28);
+    ctx.strokeStyle = 'rgba(78, 58, 34, 0.14)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(19, 19, RES - 38, RES - 38);
+
+    // Classic ink compass rose in top-right corner for orienting with HUD compass
+    const cx = RES - 48, cy = 52;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.strokeStyle = 'rgba(68, 50, 30, 0.42)';
+    ctx.fillStyle = 'rgba(68, 50, 30, 0.48)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(0, 0, 14, 0, Math.PI * 2);
+    ctx.stroke();
+    // North-south & east-west needles
+    ctx.beginPath();
+    ctx.moveTo(0, -20); ctx.lineTo(4, 0); ctx.lineTo(0, -3); ctx.lineTo(-4, 0); ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(0, 18); ctx.lineTo(0, 3);
+    ctx.moveTo(-18, 0); ctx.lineTo(18, 0);
+    ctx.stroke();
+    ctx.font = '600 11px "Noto Serif TC", serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('北', 0, -24);
+    ctx.restore();
   }
 
   /** Add a reveal. p=1 shows instantly, p=0 animates via advance(). */
@@ -118,7 +149,7 @@ export class GameMap {
     return [((x + HALF) / WORLD_SIZE) * size, ((z + HALF) / WORLD_SIZE) * size];
   }
 
-  draw(canvas: HTMLCanvasElement, player: { x: number; z: number }, heading: number, towers: Tower[], time: number) {
+  draw(canvas: HTMLCanvasElement, towers: Tower[]) {
     if (this.dirty) this.rebuild();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const css = canvas.clientWidth;
@@ -130,44 +161,34 @@ export class GameMap {
     ctx.drawImage(this.comp, 0, 0, size, size);
 
     const u = size / 100;
-    // Towers
-    for (const t of towers) {
-      if (!t.discovered && !t.activated) continue;
-      const [x, y] = this.toMap(t.def.x, t.def.z, size);
-      const col = t.activated ? '#2fb8d0' : '#e8862e';
+    const anyActivated = towers.some((t) => t.activated);
+
+    if (!anyActivated) {
       ctx.save();
-      ctx.translate(x, y);
-      if (!t.activated) {
-        const pr = 2.2 * u + Math.sin(time * 3) * 0.5 * u;
-        ctx.strokeStyle = 'rgba(232,134,46,0.5)';
-        ctx.lineWidth = 0.4 * u;
-        ctx.beginPath(); ctx.arc(0, 0, pr, 0, Math.PI * 2); ctx.stroke();
-      }
-      ctx.fillStyle = col;
-      ctx.strokeStyle = '#2a2117';
-      ctx.lineWidth = 0.35 * u;
-      ctx.beginPath();
-      ctx.moveTo(0, -1.8 * u); ctx.lineTo(1.2 * u, 1.2 * u); ctx.lineTo(-1.2 * u, 1.2 * u); ctx.closePath();
-      ctx.fill(); ctx.stroke();
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(68, 50, 30, 0.62)';
+      ctx.font = `600 ${3.1 * u}px "Noto Serif TC", serif`;
+      ctx.fillText('尚未描繪地貌', size * 0.5, size * 0.48);
+      ctx.fillStyle = 'rgba(68, 50, 30, 0.45)';
+      ctx.font = `600 ${2.0 * u}px "Noto Serif TC", serif`;
+      ctx.fillText('漫步山野，尋訪古碑共鳴以繪入山水', size * 0.5, size * 0.54);
       ctx.restore();
-      if (t.activated) {
-        ctx.font = `600 ${2.1 * u}px "Noto Serif TC", serif`;
-        ctx.textAlign = 'center';
-        ctx.fillStyle = 'rgba(42,33,23,0.85)';
-        ctx.fillText(t.def.name, x, y + 4 * u);
-      }
+      return;
     }
-    // Player arrow (heading: bearing, 0 = north / -z)
-    const [px, py] = this.toMap(player.x, player.z, size);
+
+    // Subtle hand-inked region names only for already-resonated areas (no player GPS, no unfound landmarks)
     ctx.save();
-    ctx.translate(px, py);
-    ctx.rotate(heading);
-    ctx.fillStyle = '#d6452f';
-    ctx.strokeStyle = '#fff8e8';
-    ctx.lineWidth = 0.4 * u;
-    ctx.beginPath();
-    ctx.moveTo(0, -2 * u); ctx.lineTo(1.4 * u, 1.5 * u); ctx.lineTo(0, 0.7 * u); ctx.lineTo(-1.4 * u, 1.5 * u); ctx.closePath();
-    ctx.fill(); ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.font = `600 ${2.15 * u}px "Noto Serif TC", serif`;
+    for (const t of towers) {
+      if (!t.activated) continue;
+      const [x, y] = this.toMap(t.def.x, t.def.z, size);
+      const regionName = t.def.name.replace(/之碑$/, '');
+      ctx.fillStyle = 'rgba(243, 234, 214, 0.65)';
+      ctx.fillText(regionName, x, y + 0.35 * u);
+      ctx.fillStyle = 'rgba(48, 36, 22, 0.72)';
+      ctx.fillText(regionName, x, y);
+    }
     ctx.restore();
   }
 }

@@ -7,12 +7,12 @@
     <meta name="theme-color" content="#cfe3ea" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="description" content="三角之境：一款以地形探索為核心的低多邊形 3D 網頁遊戲。翻過山丘、看見遠方的光芒、登上高塔揭開地圖。" />
+    <meta name="description" content="三角之境：一款以地形探索為核心的低多邊形 3D 網頁遊戲。漫步山野、尋訪隱於霧中的古碑、靜心共鳴描繪大地之貌。" />
     <title>三角之境 · Triangle Lands</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&display=swap&text=三角之境登上高塔揭開地圖翻過山丘看見下一個遠方繼續開始探索重置進度已點亮座初始西嶺東崖南湖霧林北境TriangleLands0123456789/"
+      href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&display=swap"
       rel="stylesheet"
     />
   </head>
@@ -22,25 +22,37 @@
 
     <div id="hud" hidden>
       <div class="hud-top">
-        <div class="pill tower-count" title="已點亮的高塔">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l3 4h-2l2 16H9l2-16H9z" /></svg>
+        <div class="pill tower-count" title="已共鳴的古碑">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.6 3.5L12 9 9.4 5.5zM7 21l2.4-10h5.2L17 21z" /></svg>
           <span id="tower-count-num">0</span><span class="of">/ 6</span>
         </div>
         <div class="compass" aria-hidden="true">
           <div id="compass-strip" class="compass-strip"></div>
           <div class="compass-needle"></div>
         </div>
-        <button id="btn-map" class="pill icon-btn" aria-label="開啟地圖">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2zM9 4v14M15 6v14" /></svg>
-        </button>
+        <div class="hud-right">
+          <button id="btn-audio" class="pill icon-btn" aria-label="切換背景音效" title="切換背景音效">
+            <svg id="icon-audio-on" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M11 5L6 9H3v6h3l5 4V5z" />
+              <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />
+            </svg>
+            <svg id="icon-audio-off" viewBox="0 0 24 24" aria-hidden="true" hidden>
+              <path d="M11 5L6 9H3v6h3l5 4V5z" />
+              <path d="M22 9l-6 6M16 9l6 6" />
+            </svg>
+          </button>
+          <button id="btn-map" class="pill icon-btn" aria-label="開啟地圖" title="大地圖 (M)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2zM9 4v14M15 6v14" /></svg>
+          </button>
+        </div>
       </div>
 
       <div id="joystick" class="joystick"><div id="joy-knob" class="joy-knob"></div></div>
 
       <div class="hud-actions">
-        <button id="btn-climb" class="action-btn climb" hidden>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l6 7h-4v9h-4v-9H6z" /></svg>
-          <span id="btn-climb-label">攀爬</span>
+        <button id="btn-interact" class="action-btn interact" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l4.5 6.5L12 16 7.5 9.5zM5 19.5c2.2-1.6 4.5-2.4 7-2.4s4.8.8 7 2.4" /></svg>
+          <span id="btn-interact-label">共鳴</span>
         </button>
         <button id="btn-jump" class="action-btn jump" aria-label="跳躍">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 15l7-7 7 7" /></svg>
@@ -50,7 +62,7 @@
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
       <div id="hint" class="hint">
         <span class="touch-only">左側拖曳移動 · 右側拖曳轉動視角</span>
-        <span class="desk-only">WASD 移動 · 滑鼠拖曳視角 · 空白鍵跳躍 · E 攀爬 · M 地圖</span>
+        <span class="desk-only">WASD 移動 · 滑鼠拖曳視角 · 空白鍵跳躍 · E 共鳴 · M 地圖</span>
       </div>
     </div>
 
@@ -69,7 +81,7 @@
       <div class="title-inner">
         <p class="eyebrow">Triangle Lands</p>
         <h1>三角之境</h1>
-        <p class="lede">翻過山丘，看見下一個遠方。<br />登上高塔，揭開地圖。</p>
+        <p class="lede">漫步山野，尋訪隱於霧中的古碑。<br />靜心共鳴，描繪大地之貌。</p>
         <div class="title-actions">
           <button id="btn-start" class="btn-primary">開始探索</button>
           <button id="btn-reset" class="btn-ghost" hidden>重置進度</button>
