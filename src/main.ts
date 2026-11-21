@@ -52,6 +52,7 @@ interface SaveData {
   orbs?: number[];
   courses?: number[];
   tips?: string[];
+  explored?: string;
 }
 const loadSave = (): SaveData | null => {
   try { return JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch { return null; }
@@ -219,6 +220,7 @@ function applySave() {
     (s.orbs ?? []).forEach((i) => i < orbs.total && orbs.setCollected(i, true));
     (s.courses ?? []).forEach((i) => courses[i]?.setDone(true));
     (s.tips ?? []).forEach((t) => tipsShown.add(t));
+    gameMap.loadTrail(s.explored);
   }
   resetPlayer();
   if (s?.pos) {
@@ -226,6 +228,7 @@ function applySave() {
     const gy = Math.max(world.ground(gx, gz, 0), WATER_LEVEL - 1.1);
     player.place(gx, gy, gz);
   }
+  gameMap.explore(player.pos.x, player.pos.z);
 }
 
 function save() {
@@ -236,6 +239,7 @@ function save() {
     orbs: orbs.collected.flatMap((c, i) => (c ? [i] : [])),
     courses: courses.filter((c) => c.done).map((c) => c.id),
     tips: [...tipsShown],
+    explored: gameMap.serializeTrail(),
   };
   localStorage.setItem(SAVE_KEY, JSON.stringify(data));
 }
@@ -408,12 +412,16 @@ function openMap(animate = false) {
   audio.playMap(true);
   $('map-progress').textContent = progressText();
   mapOverlay.hidden = false;
-  gameMap.draw(mapCanvas, towers);
+  gameMap.draw(mapCanvas, towers, elapsed);
   void mapOverlay.offsetWidth;
   mapOverlay.classList.add('open');
 }
 function closeMap() {
   if (state !== 'map') return;
+  if (mapAnimating) {
+    gameMap.finishReveals();
+    mapAnimating = false;
+  }
   audio.playMap(false);
   mapOverlay.classList.remove('open');
   clearTimeout(mapHideTimer);
@@ -482,7 +490,7 @@ function activate(t: Tower) {
   save();
   btnInteract.hidden = true;
   sparkles.burst(new THREE.Vector3(t.def.x, t.base + 3.6, t.def.z), 80, '#7ff0ff', 12, 0.8, 1.8, 2);
-  toast(`${t.def.name} 已共鳴`, '地貌已繪入地圖 · 體力上限提升 · 古碑旁升起上升氣流', 4200);
+  toast(`${t.def.name} 已共鳴`, '周遭迷霧已散去 · 體力上限提升 · 古碑旁升起上升氣流', 4200);
   cine = { tower: t, t: 0 };
   state = 'cinematic';
 }
@@ -747,6 +755,7 @@ function frame() {
   } else {
     if (state === 'play') {
       player.update(dt, input, camYaw, world);
+      gameMap.explore(player.pos.x, player.pos.z);
       moveSpeed = player.climbing
         ? Math.min(1, Math.hypot(input.move.x, input.move.y))
         : Math.min(1, player.speedXZ / 8.5);
@@ -792,9 +801,12 @@ function frame() {
       } else if (state === 'cinematic') {
         updateCinematic(dt);
       } else if (state === 'map') {
-        if (input.map) closeMap();
-        if (mapAnimating) mapAnimating = gameMap.advance(dt);
-        gameMap.draw(mapCanvas, towers);
+        if (input.map) {
+          closeMap();
+        } else {
+          if (mapAnimating) mapAnimating = gameMap.advance(dt);
+          gameMap.draw(mapCanvas, towers, elapsed);
+        }
       }
     }
     updateCamera(dt);
@@ -878,7 +890,7 @@ frame();
 
 if (import.meta.env.DEV) {
   (window as unknown as Record<string, unknown>).__game = {
-    player, towers, terrain, activate, startVista, openMap, audio, orbs, updrafts, courses, world,
+    player, towers, terrain, gameMap, activate, startVista, openMap, audio, orbs, updrafts, courses, world,
     setYaw: (y: number) => { camYaw = y; },
     setPitch: (p: number) => { camPitch = p; },
     getState: () => state,
@@ -887,6 +899,7 @@ if (import.meta.env.DEV) {
       const log: string[] = [];
       for (let i = 0; i < n; i++) {
         player.update(1 / 60, { move: { x: mx, y: my }, jump: i === jumpAt, sprint }, camYaw, world);
+        gameMap.explore(player.pos.x, player.pos.z);
         chest.set(player.pos.x, player.pos.y + 1.0, player.pos.z);
         for (const c of courses) { const ev = c.update(elapsed, 1 / 60, chest); if (ev) log.push(`${c.name}:${ev.type}${ev.index}`); }
         const got = orbs.update(elapsed, 1 / 60, chest, true);

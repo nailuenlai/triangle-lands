@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Terrain, SEG, HALF, WATER_LEVEL, WORLD_SIZE, smoothstep } from './terrain';
 import { mulberry32, Simplex2 } from './noise';
 
+export const EXPLORE_RADIUS = 28;
 export const REVEAL_RADIUS = 150;
 export const START_POS = { x: 10, z: 70 };
 
