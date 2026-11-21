@@ -63,6 +63,27 @@ export class Input {
     layer.addEventListener('pointerup', end);
     layer.addEventListener('pointercancel', end);
 
+    const prevent = (e: Event) => e.preventDefault();
+    layer.addEventListener('touchstart', prevent, { passive: false });
+    layer.addEventListener('touchmove', prevent, { passive: false });
+    layer.addEventListener('touchend', prevent, { passive: false });
+
+    // Prevent browser pinch-zoom and double-tap zoom (especially iOS Safari,
+    // which ignores user-scalable=no and does not cancel touch gestures via
+    // pointerdown.preventDefault()). Keep single-finger clicks on title buttons working.
+    document.addEventListener('gesturestart', prevent, { passive: false });
+    document.addEventListener('gesturechange', prevent, { passive: false });
+    document.addEventListener('gestureend', prevent, { passive: false });
+    document.addEventListener('dblclick', prevent);
+    document.addEventListener('touchstart', (e) => {
+      if (e.touches.length > 1) e.preventDefault();
+    }, { passive: false });
+    document.addEventListener('touchmove', (e) => {
+      if (e.touches.length > 1 || ('scale' in e && (e as TouchEvent & { scale: number }).scale !== 1)) {
+        e.preventDefault();
+      }
+    }, { passive: false });
+
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
       if (e.repeat) return;
@@ -75,12 +96,21 @@ export class Input {
     window.addEventListener('blur', () => { this.keys.clear(); this.sprintBtn = false; });
   }
 
+  private preventTouchDefaults(el: HTMLElement) {
+    const prevent = (e: Event) => e.preventDefault();
+    el.addEventListener('touchstart', prevent, { passive: false });
+    el.addEventListener('touchend', prevent, { passive: false });
+    el.addEventListener('dblclick', prevent);
+  }
+
   bindButton(el: HTMLElement, fn: () => void) {
+    this.preventTouchDefaults(el);
     el.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); fn(); });
   }
 
   /** A press-and-hold button (touch sprint). */
   bindHold(el: HTMLElement, onDown?: () => void) {
+    this.preventTouchDefaults(el);
     el.addEventListener('pointerdown', (e) => {
       e.preventDefault(); e.stopPropagation();
       el.setPointerCapture(e.pointerId);
