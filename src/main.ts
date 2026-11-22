@@ -1,16 +1,21 @@
 import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import './style.css';
 import { Terrain, WATER_LEVEL, smoothstep, type Flatten } from './terrain';
 import {
   createSky, createTerrainMesh, createWater, createVegetation, createClouds,
-  Tower, TOWER_DEFS, REVEAL_RADIUS, START_POS, COLORS,
+  DynamicGrassField, Tower, TOWER_DEFS, REVEAL_RADIUS, START_POS, COLORS,
 } from './world';
 import { Player, type WorldQuery } from './player';
 import { Input } from './input';
 import { GameMap } from './map';
 import { NatureAudio } from './audio';
-import { Particles } from './fx';
+import { Particles, AmbientMotes } from './fx';
 import { createWilds, RingCourse, type CourseEvent } from './collectibles';
+import { updateCelTime, updateDayNight, DAY_PRESETS } from './cel';
 
 // ------------------------------------------------------------ DOM
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -21,6 +26,9 @@ const mapOverlay = $('map-overlay');
 const mapCanvas = $<HTMLCanvasElement>('map-canvas');
 const btnInteract = $('btn-interact');
 const btnInteractLabel = $('btn-interact-label');
+const btnTime = $('btn-time');
+const iconSun = $('icon-sun');
+const iconMoon = $('icon-moon');
 const btnAudio = $('btn-audio');
 const iconAudioOn = $('icon-audio-on');
 const iconAudioOff = $('icon-audio-off');
@@ -67,18 +75,78 @@ function syncAudioUI() {
 }
 syncAudioUI();
 
-// ------------------------------------------------------------ Renderer / scene
+// ------------------------------------------------------------ Renderer / scene / post-processing
+const isTouch = matchMedia('(pointer: coarse)').matches;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
+renderer.toneMapping = THREE.AgXToneMapping;
+renderer.toneMappingExposure = 1.08;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(COLORS.horizon, 70, 460);
 const camera = new THREE.PerspectiveCamera(62, 1, 0.3, 1500);
 
-const sunDir = new THREE.Vector3(0.45, 0.6, 0.35).normalize();
-scene.add(new THREE.HemisphereLight('#d8ecff', '#6b5a3a', 1.5));
-const sun = new THREE.DirectionalLight('#fff0d4', 2.4);
-sun.position.copy(sunDir).multiplyScalar(100);
-scene.add(sun);
+// Selective Soft Bloom (HDR HalfFloat target + half-res bloom + AgX OutputPass)
+const composerTarget = new THREE.WebGLRenderTarget(1, 1, {
+  type: THREE.HalfFloatType,
+});
+const composer = new EffectComposer(renderer, composerTarget);
+composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.32, 0.56, 0.98);
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
+
+const sunDir = new THREE.Vector3(0.48, 0.58, 0.36).normalize();
+const hemi = new THREE.HemisphereLight('#d6eeff', '#7b6d4a', 1.4);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight('#fff3db', 2.4);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+const SHADOW_RANGE = 62;
+const SHADOW_TEXEL = (SHADOW_RANGE * 2) / 1024;
+sun.shadow.camera.left = -SHADOW_RANGE;
+sun.shadow.camera.right = SHADOW_RANGE;
+sun.shadow.camera.top = SHADOW_RANGE;
+sun.shadow.camera.bottom = -SHADOW_RANGE;
+sun.shadow.camera.near = 10;
+sun.shadow.camera.far = 260;
+sun.shadow.bias = -0.00045;
+sun.shadow.normalBias = 0.08;
+sun.position.copy(sunDir).multiplyScalar(120);
+scene.add(sun, sun.target);
+
+const shadowFocus = new THREE.Vector3();
+function updateSunShadow(fx: number, fy: number, fz: number) {
+  // Texel-snap to prevent shadow edge shimmer during movement
+  const sx = Math.round(fx / SHADOW_TEXEL) * SHADOW_TEXEL;
+  const sz = Math.round(fz / SHADOW_TEXEL) * SHADOW_TEXEL;
+  shadowFocus.set(sx, fy, sz);
+  sun.target.position.copy(shadowFocus);
+  sun.position.copy(shadowFocus).addScaledVector(sunDir, 125);
+  sun.target.updateMatrixWorld();
+}
+
+// Day / Night cycle (1 full day = 6 minutes; smooth manual glide via T / sun-moon button)
+const DAY_DURATION = 360;
+let timeOfDay = 0.39; // bright late-morning start
+let timePresetIdx = 0;
+let timeGlide: { from: number; delta: number; t: number; dur: number } | null = null;
+
+function applyDayNight(tod: number) {
+  const dn = updateDayNight(tod);
+  sunDir.copy(dn.lightDir);
+  hemi.color.copy(dn.hemiSky);
+  hemi.groundColor.copy(dn.hemiGround);
+  hemi.intensity = dn.hemiIntensity;
+  bloomPass.strength = dn.bloomStrength;
+  const isNight = dn.phase === 'night';
+  iconSun.toggleAttribute('hidden', isNight);
+  iconMoon.toggleAttribute('hidden', !isNight);
+  btnTime.title = `切換時辰：目前${dn.phaseLabel} (T)`;
+}
+applyDayNight(timeOfDay);
 
 const flats: Flatten[] = [
   ...TOWER_DEFS.map((d) => ({ x: d.x, z: d.z, r: 12 })),
@@ -86,8 +154,10 @@ const flats: Flatten[] = [
 ];
 const terrain = new Terrain(flats);
 const sky = createSky(sunDir);
-scene.add(sky, createTerrainMesh(terrain), createWater());
+scene.add(sky, createTerrainMesh(terrain), createWater(terrain));
 scene.add(createVegetation(terrain, flats.map((f) => ({ x: f.x, z: f.z, r: f.r * 0.72 }))));
+const grassField = new DynamicGrassField(terrain);
+scene.add(grassField.group);
 const clouds = createClouds();
 scene.add(clouds);
 
@@ -102,7 +172,8 @@ courses.forEach((c) => scene.add(c.group));
 
 const sparkles = new Particles(900, true);
 const dust = new Particles(400, false);
-scene.add(sparkles.points, dust.points);
+const ambientMotes = new AmbientMotes(260);
+scene.add(sparkles.points, dust.points, ambientMotes.points);
 
 const player = new Player();
 scene.add(player.model, player.shadow);
@@ -150,6 +221,23 @@ input.bindHold($('btn-sprint'), () => audio.unlock());
 input.bindButton(btnInteract, () => { audio.unlock(); input.action = true; });
 input.bindButton($('btn-map'), () => { audio.unlock(); input.map = true; });
 input.bindButton($('btn-map-close'), () => closeMap());
+function cycleTimeOfDay() {
+  timePresetIdx = (timePresetIdx + 1) % DAY_PRESETS.length;
+  const preset = DAY_PRESETS[timePresetIdx];
+  const delta = ((preset.t - timeOfDay) % 1 + 1) % 1;
+  timeGlide = { from: timeOfDay, delta: delta < 0.02 ? delta + 1 : delta, t: 0, dur: 1.5 };
+  const moodSub: Record<string, string> = {
+    morning: '清風徐來 · 朗朗晴空',
+    sunset: '落日熔金 · 霞染群峰',
+    night: '星河垂野 · 螢火微光',
+    dawn: '微曦破曉 · 山嵐輕浮',
+  };
+  toast(`時辰流轉 · ${preset.label}`, moodSub[preset.phase] ?? '', 2400);
+}
+input.bindButton(btnTime, () => {
+  audio.unlock();
+  if (state === 'play' || state === 'vista') cycleTimeOfDay();
+});
 input.bindButton(btnAudio, () => {
   const m = audio.toggleMute();
   localStorage.setItem(MUTE_KEY, m ? '1' : '0');
@@ -159,7 +247,6 @@ input.onFirstMove = () => {
   audio.unlock();
   hintEl.classList.add('gone');
 };
-const isTouch = matchMedia('(pointer: coarse)').matches;
 document.body.classList.toggle('touch', isTouch);
 const JUMP_KEY = isTouch ? '跳躍鍵' : '空白鍵';
 const SPRINT_KEY = isTouch ? '衝刺鍵' : 'Shift';
@@ -827,6 +914,33 @@ function frame() {
     climbing: player.climbing,
   });
 
+  updateCelTime(elapsed);
+
+  // Advance day/night cycle naturally during gameplay (or glide smoothly on manual skip)
+  if (timeGlide) {
+    timeGlide.t += dt;
+    const p = Math.min(1, timeGlide.t / timeGlide.dur);
+    const e = p * p * (3 - 2 * p);
+    timeOfDay = (timeGlide.from + timeGlide.delta * e) % 1;
+    if (p >= 1) timeGlide = null;
+    applyDayNight(timeOfDay);
+  } else if (state !== 'title' && state !== 'map') {
+    timeOfDay = (timeOfDay + dt / DAY_DURATION) % 1;
+    applyDayNight(timeOfDay);
+  }
+
+  if (state === 'title') {
+    updateSunShadow(0, 20, 0);
+    grassField.group.visible = false;
+    ambientMotes.points.visible = false;
+  } else {
+    updateSunShadow(player.pos.x, player.pos.y, player.pos.z);
+    grassField.group.visible = true;
+    grassField.update(player.pos);
+    ambientMotes.points.visible = true;
+    ambientMotes.update(player.pos);
+  }
+
   towers.forEach((t) => t.update(elapsed, dt, player.pos, state === 'title'));
   updrafts.forEach((u) => u.update(elapsed, dt, sparkles, state === 'title' ? camera.position : player.pos));
   sparkles.update(dt);
@@ -837,20 +951,25 @@ function frame() {
   });
   sky.position.copy(camera.position);
   input.clearPresses();
-  renderer.render(scene, camera);
+  composer.render();
   requestAnimationFrame(frame);
 }
 
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
+  const pr = renderer.getPixelRatio();
   renderer.setSize(w, h, false);
+  composer.setPixelRatio(pr);
+  composer.setSize(w, h);
+  bloomPass.resolution.set(Math.max(1, Math.floor(w * 0.5)), Math.max(1, Math.floor(h * 0.5)));
   camera.aspect = w / h;
   baseFov = w < h ? 72 : 62;
   camera.fov = baseFov + fovKick;
   camera.updateProjectionMatrix();
-  const ph = h * renderer.getPixelRatio();
+  const ph = h * pr;
   sparkles.setViewport(ph, baseFov);
   dust.setViewport(ph, baseFov);
+  ambientMotes.setViewport(ph, baseFov);
 }
 window.addEventListener('resize', resize);
 resize();
@@ -884,7 +1003,12 @@ $('btn-reset').addEventListener('click', () => {
   everythingShown = false;
   startGame();
 });
-window.addEventListener('keydown', () => { if (state !== 'title') audio.unlock(); }, { passive: true });
+window.addEventListener('keydown', (e) => {
+  if (state !== 'title') audio.unlock();
+  if (e.code === 'KeyT' && !e.repeat && (state === 'play' || state === 'vista')) {
+    cycleTimeOfDay();
+  }
+}, { passive: true });
 
 frame();
 
@@ -893,6 +1017,7 @@ if (import.meta.env.DEV) {
     player, towers, terrain, gameMap, activate, startVista, openMap, audio, orbs, updrafts, courses, world,
     setYaw: (y: number) => { camYaw = y; },
     setPitch: (p: number) => { camPitch = p; },
+    setTime: (tod: number) => { timeGlide = null; timeOfDay = ((tod % 1) + 1) % 1; applyDayNight(timeOfDay); },
     getState: () => state,
     /** Deterministically step the player (dev testing only). */
     sim: (n: number, mx: number, my: number, jumpAt = -1, sprint = false) => {

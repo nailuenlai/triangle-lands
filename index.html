@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Cpath d=%22M16 3 30 28H2z%22 fill=%22%234fe3ff%22/%3E%3C/svg%3E" />
-    <meta name="theme-color" content="#cfe3ea" />
+    <meta name="theme-color" content="#dfeeee" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="description" content="三角之境：一款以地形探索為核心的低多邊形 3D 網頁遊戲。攀岩、滑翔、乘上升氣流、挑戰風之試煉、收集靈光，尋訪隱於霧中的古碑。" />
@@ -38,6 +38,15 @@
           <div class="compass-needle"></div>
         </div>
         <div class="hud-right">
+          <button id="btn-time" class="pill icon-btn" aria-label="切換時辰" title="切換時辰 (T)">
+            <svg id="icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2.5v2.2M12 19.3v2.2M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.9 19.1l1.6-1.6M17.5 6.5l1.6-1.6" />
+            </svg>
+            <svg id="icon-moon" viewBox="0 0 24 24" aria-hidden="true" hidden>
+              <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.6 6.6 0 0 0 10.5 10.5z" />
+            </svg>
+          </button>
           <button id="btn-audio" class="pill icon-btn" aria-label="切換背景音效" title="切換背景音效">
             <svg id="icon-audio-on" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M11 5L6 9H3v6h3l5 4V5z" />
@@ -85,7 +94,7 @@
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
       <div id="hint" class="hint">
         <span class="touch-only">左側拖曳移動 · 右側拖曳視角 · 推向岩壁即可攀爬 · 空中再按跳躍滑翔</span>
-        <span class="desk-only">WASD 移動 · Shift 衝刺 · 空白鍵跳躍／空中展開滑翔翼 · 推向岩壁攀爬 · E 共鳴 · M 地圖</span>
+        <span class="desk-only">WASD 移動 · Shift 衝刺 · 空白鍵跳躍／空中展開滑翔翼 · 推向岩壁攀爬 · E 共鳴 · M 地圖 · T 切換時辰</span>
       </div>
     </div>
 

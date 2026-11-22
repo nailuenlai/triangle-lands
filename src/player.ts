@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { HALF, WATER_LEVEL } from './terrain';
+import { createCelMaterial, createSubtleOutlineMaterial } from './cel';
 
 export interface WorldQuery {
   ground(x: number, z: number, y: number): number;
@@ -98,41 +99,67 @@ export class Player {
   private glider: THREE.Group;
 
   constructor() {
-    const cloak = new THREE.MeshLambertMaterial({ color: '#2f6fa3', flatShading: true });
-    const cloakDark = new THREE.MeshLambertMaterial({ color: '#245a86', flatShading: true });
-    const skin = new THREE.MeshLambertMaterial({ color: '#f1c9a5', flatShading: true });
-    const hair = new THREE.MeshLambertMaterial({ color: '#3b2a1e', flatShading: true });
-    const scarf = new THREE.MeshLambertMaterial({ color: '#e0663d', flatShading: true });
-    const boot = new THREE.MeshLambertMaterial({ color: '#4a3424', flatShading: true });
-    const eye = new THREE.MeshBasicMaterial({ color: '#1b1b1b' });
+    const cloak = createCelMaterial({
+      color: '#2e78b5', shadowTint: '#5974a8', rimStrength: 0.46, rimPower: 2.5, cacheKey: 'cel_player_v1',
+    });
+    const cloakDark = createCelMaterial({
+      color: '#235e91', shadowTint: '#526a9c', rimStrength: 0.4, rimPower: 2.6, cacheKey: 'cel_player_v1',
+    });
+    const skin = createCelMaterial({
+      color: '#f5cfa9', shadowTint: '#9b87a8', rimStrength: 0.42, rimPower: 2.6, cacheKey: 'cel_player_v1',
+    });
+    const hair = createCelMaterial({
+      color: '#473222', shadowTint: '#5c6687', rimStrength: 0.36, rimPower: 2.8, cacheKey: 'cel_player_v1',
+    });
+    const scarf = createCelMaterial({
+      color: '#e8653c', shadowTint: '#8d6c96', rimStrength: 0.5, rimPower: 2.4, cacheKey: 'cel_player_v1',
+    });
+    const boot = createCelMaterial({
+      color: '#543c2b', shadowTint: '#5c6a8a', rimStrength: 0.25, cacheKey: 'cel_player_v1',
+    });
+    const eye = new THREE.MeshBasicMaterial({ color: '#1b1b1b', fog: false });
+    const outlineMat = createSubtleOutlineMaterial(0.02, '#2d354c');
+
+    const withOutline = (mesh: THREE.Mesh) => {
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      const hull = new THREE.Mesh(mesh.geometry, outlineMat);
+      hull.renderOrder = 2;
+      mesh.add(hull);
+      return mesh;
+    };
 
     this.body = new THREE.Group();
-    const torso = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.25, 6), cloak);
+    const torso = withOutline(new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.25, 12), cloak));
     torso.position.y = 0.72;
-    const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.33, 0), skin);
+    const head = withOutline(new THREE.Mesh(new THREE.IcosahedronGeometry(0.33, 1), skin));
     head.position.y = 1.55;
-    const hairM = new THREE.Mesh(new THREE.IcosahedronGeometry(0.35, 0), hair);
+    const hairM = withOutline(new THREE.Mesh(new THREE.IcosahedronGeometry(0.355, 1), hair));
     hairM.position.set(0, 1.63, -0.06);
-    hairM.scale.set(1, 0.8, 1);
-    const sc = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.38, 0.18, 6), scarf);
+    hairM.scale.set(1, 0.82, 1);
+    const sc = withOutline(new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.38, 0.18, 12), scarf));
     sc.position.y = 1.25;
-    const tailGeo = new THREE.BoxGeometry(0.14, 0.5, 0.06);
-    tailGeo.translate(0, -0.25, 0);
-    this.tail = new THREE.Mesh(tailGeo, scarf);
+    const tailGeo = new THREE.BoxGeometry(0.14, 0.52, 0.06);
+    tailGeo.translate(0, -0.26, 0);
+    this.tail = withOutline(new THREE.Mesh(tailGeo, scarf));
     this.tail.position.set(0.12, 1.25, -0.3);
     this.tail.rotation.x = 0.35;
     const e1 = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.02), eye);
     e1.position.set(0.11, 1.57, 0.31);
     const e2 = e1.clone(); e2.position.x = -0.11;
 
-    const armGeo = new THREE.BoxGeometry(0.14, 0.56, 0.14);
+    const armGeo = new THREE.CylinderGeometry(0.068, 0.075, 0.56, 8);
     armGeo.translate(0, -0.26, 0);
-    const handGeo = new THREE.IcosahedronGeometry(0.09, 0);
+    const handGeo = new THREE.IcosahedronGeometry(0.09, 1);
     handGeo.translate(0, -0.56, 0);
     const mkArm = (x: number) => {
       const g = new THREE.Group();
       g.position.set(x, 1.2, 0);
-      g.add(new THREE.Mesh(armGeo, cloakDark), new THREE.Mesh(handGeo, skin));
+      const sleeve = new THREE.Mesh(armGeo, cloakDark);
+      const hand = new THREE.Mesh(handGeo, skin);
+      sleeve.castShadow = true;
+      hand.castShadow = true;
+      g.add(sleeve, hand);
       return g;
     };
     this.armL = mkArm(0.36);
@@ -141,6 +168,8 @@ export class Player {
     footGeo.translate(0, 0.065, 0.04);
     this.footL = new THREE.Mesh(footGeo, boot);
     this.footR = new THREE.Mesh(footGeo, boot);
+    this.footL.castShadow = true;
+    this.footR.castShadow = true;
     this.footL.position.x = 0.17;
     this.footR.position.x = -0.17;
 
@@ -150,9 +179,14 @@ export class Player {
     const nose = [0, 0.12, 1.15], lt = [-1.9, -0.2, -0.65], rt = [1.9, -0.2, -0.65], back = [0, 0.28, -0.4];
     wing.setAttribute('position', new THREE.Float32BufferAttribute([...nose, ...lt, ...back, ...nose, ...back, ...rt], 3));
     wing.computeVertexNormals();
-    const cloth = new THREE.MeshLambertMaterial({ color: '#f4ead2', side: THREE.DoubleSide, flatShading: true });
-    const stripe = new THREE.MeshLambertMaterial({ color: '#e0663d', side: THREE.DoubleSide, flatShading: true });
+    const cloth = createCelMaterial({
+      color: '#fbf3e0', side: THREE.DoubleSide, shadowTint: '#8da3c4', rimStrength: 0.45, cacheKey: 'cel_glider_v1',
+    });
+    const stripe = createCelMaterial({
+      color: '#e5653c', side: THREE.DoubleSide, shadowTint: '#8e6d94', rimStrength: 0.45, cacheKey: 'cel_glider_v1',
+    });
     const wingMesh = new THREE.Mesh(wing, cloth);
+    wingMesh.castShadow = true;
     const inner = new THREE.Mesh(wing, stripe);
     inner.scale.setScalar(0.5);
     inner.position.set(0, 0.03, 0.12);
@@ -162,7 +196,7 @@ export class Player {
         new THREE.Vector3(1.85, -0.2, -0.62), new THREE.Vector3(0.3, -1.3, 0),
         new THREE.Vector3(0, 0.1, 1.1), new THREE.Vector3(0, -1.3, 0.05),
       ]),
-      new THREE.LineBasicMaterial({ color: '#5a4630', transparent: true, opacity: 0.7 }),
+      new THREE.LineBasicMaterial({ color: '#5a4630', transparent: true, opacity: 0.72 }),
     );
     this.glider.add(wingMesh, inner, strings);
     this.glider.position.set(0, 2.55, 0);
@@ -176,12 +210,12 @@ export class Player {
     cv.width = cv.height = 64;
     const ctx = cv.getContext('2d')!;
     const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-    g.addColorStop(0, 'rgba(0,0,0,0.45)');
-    g.addColorStop(1, 'rgba(0,0,0,0)');
+    g.addColorStop(0, 'rgba(32,52,88,0.28)');
+    g.addColorStop(1, 'rgba(32,52,88,0)');
     ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
     this.shadow = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.8, 1.8).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }),
+      new THREE.PlaneGeometry(1.7, 1.7).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, fog: false }),
     );
   }
 

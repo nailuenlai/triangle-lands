@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { celUniforms } from './cel';
+import { mulberry32 } from './noise';
 
 /**
  * Pooled soft-sprite particle system (one draw call): sparkles, dust,
@@ -66,6 +68,7 @@ export class Particles {
           a = a * a * vAlpha;
           if (a < 0.003) discard;
           gl_FragColor = vec4(vColor * a, a);
+          #include <tonemapping_fragment>
           #include <colorspace_fragment>
         }`,
       vertexColors: true,
@@ -150,3 +153,143 @@ export class Particles {
     g.attributes.aAlpha.needsUpdate = true;
   }
 }
+
+/**
+ * GPU-driven toroidal atmospheric motes following the player (zero per-frame CPU loop):
+ * - Daytime: airy sunlit pollen & dandelion fluff drifting on mountain breezes
+ * - Sunset: warm golden dust glinting in low sunlight
+ * - Nighttime: gently pulsing emerald-gold fireflies (螢火蟲)
+ */
+export class AmbientMotes {
+  readonly points: THREE.Points;
+  private readonly mat: THREE.ShaderMaterial;
+
+  constructor(count = 260) {
+    const rand = mulberry32(808);
+    const pos = new Float32Array(count * 3);
+    const seed = new Float32Array(count * 3); // x: phase, y: size, z: speed
+    const boxXZ = 54;
+    const boxY = 16;
+
+    for (let i = 0; i < count; i++) {
+      pos[i * 3] = rand() * boxXZ;
+      pos[i * 3 + 1] = rand() * boxY;
+      pos[i * 3 + 2] = rand() * boxXZ;
+      seed[i * 3] = rand() * Math.PI * 2;
+      seed[i * 3 + 1] = 0.22 + rand() * 0.34;
+      seed[i * 3 + 2] = 0.65 + rand() * 0.9;
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('aSeed', new THREE.BufferAttribute(seed, 3));
+
+    this.mat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      fog: false,
+      uniforms: {
+        uTime: celUniforms.uTime,
+        uNightFactor: celUniforms.uNightFactor,
+        uSunsetFactor: celUniforms.uSunsetFactor,
+        uCenter: { value: new THREE.Vector3() },
+        uScale: { value: 400 },
+        uBox: { value: new THREE.Vector3(boxXZ, boxY, boxXZ) },
+      },
+      vertexShader: /* glsl */ `
+        attribute vec3 aSeed;
+        uniform float uTime;
+        uniform float uNightFactor;
+        uniform vec3 uCenter;
+        uniform float uScale;
+        uniform vec3 uBox;
+        varying float vAlpha;
+        varying float vPulse;
+        varying float vPhase;
+
+        void main() {
+          float ph = aSeed.x;
+          float sz = aSeed.y;
+          float sp = aSeed.z;
+          vPhase = ph;
+
+          // Gentle breeze drift + organic wandering
+          vec3 drift = vec3(
+            uTime * (0.65 + 0.45 * sp) + sin(uTime * 0.7 * sp + ph) * 1.4,
+            sin(uTime * 0.9 * sp + ph * 1.7) * 0.9 + uTime * 0.14 * (1.0 - 0.6 * uNightFactor),
+            uTime * (0.32 + 0.25 * sp) + cos(uTime * 0.6 * sp + ph * 1.3) * 1.4
+          );
+
+          // Toroidally wrap around the viewer so motes surround the player everywhere
+          vec3 rel = mod(position + drift - uCenter + uBox * 0.5, uBox) - uBox * 0.5;
+          vec3 wp = uCenter + rel;
+
+          // Keep motes gracefully above water level
+          wp.y = max(wp.y, 1.9 + fract(ph * 3.17) * 2.5);
+
+          // Smooth fade near volume bounds & very close to camera lens
+          vec3 edge = 1.0 - smoothstep(uBox * 0.34, uBox * 0.5, abs(rel));
+          float boxFade = edge.x * edge.y * edge.z;
+          vec4 mv = modelViewMatrix * vec4(wp, 1.0);
+          float camDist = max(0.5, -mv.z);
+          float nearFade = smoothstep(1.2, 4.2, camDist);
+
+          // Night fireflies pulse slowly & luminously; daytime pollen twinkles softly
+          float fireflyPulse = 0.25 + 0.75 * pow(0.5 + 0.5 * sin(uTime * (1.6 + sp * 1.1) + ph * 3.0), 2.2);
+          float dayTwinkle = 0.55 + 0.45 * sin(uTime * 1.8 + ph * 2.0);
+          vPulse = mix(dayTwinkle, fireflyPulse, uNightFactor);
+
+          vAlpha = boxFade * nearFade * vPulse * mix(0.52, 0.92, uNightFactor);
+
+          float finalSize = sz * mix(0.75, 1.25, uNightFactor) * (0.7 + 0.4 * vPulse);
+          gl_PointSize = clamp(finalSize * uScale / camDist, 1.5, 22.0);
+          gl_Position = projectionMatrix * mv;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uNightFactor;
+        uniform float uSunsetFactor;
+        varying float vAlpha;
+        varying float vPulse;
+        varying float vPhase;
+
+        void main() {
+          float d = length(gl_PointCoord - 0.5) * 2.0;
+          if (d > 1.0) discard;
+          float core = smoothstep(0.55, 0.0, d);
+          float halo = pow(1.0 - d, 2.2);
+          float a = (halo * 0.65 + core * 0.85) * vAlpha;
+          if (a < 0.004) discard;
+
+          // Daytime sunlit cream pollen -> Sunset honey-gold -> Night emerald-gold fireflies (HDR for soft bloom)
+          vec3 dayCol = vec3(1.18, 1.14, 0.92);
+          vec3 sunsetCol = vec3(1.45, 1.05, 0.52);
+          vec3 fireflyA = vec3(1.35, 1.95, 0.58);
+          vec3 fireflyB = vec3(1.85, 1.65, 0.52);
+          vec3 nightCol = mix(fireflyA, fireflyB, fract(vPhase * 2.7));
+
+          vec3 col = mix(dayCol, sunsetCol, uSunsetFactor * 0.85);
+          col = mix(col, nightCol, uNightFactor);
+
+          gl_FragColor = vec4(col * a, a);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+        }
+      `,
+    });
+
+    this.points = new THREE.Points(geo, this.mat);
+    this.points.frustumCulled = false;
+    this.points.renderOrder = 6;
+  }
+
+  setViewport(heightPx: number, fovDeg: number) {
+    this.mat.uniforms.uScale.value = (heightPx * 0.5) / Math.tan((fovDeg * Math.PI) / 360);
+  }
+
+  update(center: THREE.Vector3) {
+    (this.mat.uniforms.uCenter.value as THREE.Vector3).set(center.x, center.y + 4.5, center.z);
+  }
+}
+

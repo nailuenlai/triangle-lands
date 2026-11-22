@@ -112,6 +112,7 @@ export class Updraft {
           float vfade = smoothstep(0.0, 0.08, vUv.y) * pow(1.0 - vUv.y, 1.4);
           float a = (line * flow * 0.55 + vF * 0.12) * vfade * fade;
           gl_FragColor = vec4(vec3(0.85, 0.97, 1.0) * a, a);
+          #include <tonemapping_fragment>
           #include <colorspace_fragment>
         }`,
     });
@@ -221,7 +222,7 @@ export class RingCourse {
       const soon = i === this.next + 1;
       const pulse = 1 + Math.sin(t * 5 + i) * 0.06;
       ring.mesh.scale.setScalar(isNext ? pulse * 1.08 : 1);
-      ring.mat.color.set(isNext ? '#ffd36a' : '#9ff3ff');
+      ring.mat.color.set(isNext ? '#ffd36a' : '#9ff3ff').multiplyScalar(isNext ? 1.55 : 1.15);
       ring.mat.opacity = isNext ? 0.95 : soon ? 0.6 : 0.32;
       ring.mesh.rotation.z = t * (isNext ? 1.2 : 0.3);
     }
@@ -232,7 +233,7 @@ export class RingCourse {
     r.passT += dt;
     const k = r.passT / 0.6;
     r.mesh.scale.setScalar(1 + k * 0.9);
-    r.mat.color.set('#ffffff');
+    r.mat.color.set('#ffffff').multiplyScalar(1.8);
     r.mat.opacity = Math.max(0, 1 - k);
     if (k >= 1) { r.mesh.visible = false; r.passT = -2; }
   }
@@ -263,7 +264,10 @@ export class Orbs {
     defs.forEach((d, i) => { this.live[i * 3] = d.x; this.live[i * 3 + 1] = d.y; this.live[i * 3 + 2] = d.z; });
 
     const geo = new THREE.TetrahedronGeometry(0.42, 0);
-    const mat = new THREE.MeshBasicMaterial({ color: '#fff3b0' });
+    const mat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color('#fff2a6').multiplyScalar(1.95),
+      fog: false,
+    });
     this.inst = new THREE.InstancedMesh(geo, mat, n);
     this.inst.frustumCulled = false;
 
@@ -271,8 +275,8 @@ export class Orbs {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(this.glowPos, 3).setUsage(THREE.DynamicDrawUsage));
     this.glow = new THREE.Points(g, new THREE.PointsMaterial({
-      map: softGlowTexture(), color: '#ffcf55', size: 3.4, sizeAttenuation: true,
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      map: softGlowTexture(), color: new THREE.Color('#ffcf55').multiplyScalar(1.25), size: 3.4, sizeAttenuation: true,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
     }));
     this.glow.frustumCulled = false;
     this.group.add(this.inst, this.glow);
