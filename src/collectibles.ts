@@ -98,8 +98,12 @@ export class Updraft {
         void main() {
           vUv = uv;
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          vec3 n = normalize(normalMatrix * normal);
-          vF = 1.0 - abs(dot(n, normalize(-mv.xyz)));
+          vec3 nRaw = normalMatrix * normal;
+          float nLenSq = dot(nRaw, nRaw);
+          vec3 n = nLenSq > 1e-10 ? nRaw * inversesqrt(nLenSq) : vec3(0.0, 1.0, 0.0);
+          float vLenSq = dot(mv.xyz, mv.xyz);
+          vec3 v = vLenSq > 1e-10 ? (-mv.xyz) * inversesqrt(vLenSq) : vec3(0.0, 0.0, 1.0);
+          vF = clamp(1.0 - abs(dot(n, v)), 0.0, 1.0);
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: /* glsl */ `
@@ -109,7 +113,8 @@ export class Updraft {
           float band = fract(vUv.x * 7.0 + vUv.y * 2.5 - time * 0.12);
           float line = smoothstep(0.0, 0.06, band) * smoothstep(0.22, 0.06, band);
           float flow = 0.45 + 0.55 * sin(vUv.y * 22.0 - time * 7.0 + vUv.x * 6.283);
-          float vfade = smoothstep(0.0, 0.08, vUv.y) * pow(1.0 - vUv.y, 1.4);
+          float vTop = clamp(1.0 - vUv.y, 0.0, 1.0);
+          float vfade = smoothstep(0.0, 0.08, vUv.y) * (vTop > 1e-6 ? pow(vTop, 1.4) : 0.0);
           float a = (line * flow * 0.55 + vF * 0.12) * vfade * fade;
           gl_FragColor = vec4(vec3(0.85, 0.97, 1.0) * a, a);
           #include <tonemapping_fragment>

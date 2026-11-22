@@ -3,6 +3,7 @@ import { Terrain, SEG, HALF, WATER_LEVEL, WORLD_SIZE, smoothstep } from './terra
 import { mulberry32, Simplex2 } from './noise';
 import {
   BOTW_PALETTE,
+  CEL_SAFE_MATH_GLSL,
   celUniforms,
   createCelMaterial,
   createCloudMaterial,
@@ -213,6 +214,7 @@ export function createSky(sunDir: THREE.Vector3): THREE.Mesh {
       uniform float uNightFactor;
       uniform float uSunsetFactor;
       varying vec3 vDir;
+      ${CEL_SAFE_MATH_GLSL}
 
       float skyHash(vec2 p) {
         p = fract(p * vec2(234.34, 435.345));
@@ -221,7 +223,7 @@ export function createSky(sunDir: THREE.Vector3): THREE.Mesh {
       }
 
       void main() {
-        vec3 d = normalize(vDir);
+        vec3 d = safeNormalize(vDir);
         float h = clamp(d.y, 0.0, 1.0);
 
         // Three-band BotW sky gradient (adapts smoothly across dawn, day, sunset & night)
@@ -229,25 +231,25 @@ export function createSky(sunDir: THREE.Vector3): THREE.Mesh {
         c = mix(c, uZenith, smoothstep(0.22, 0.82, h));
 
         // Warm sunset / dawn horizon scatter toward the sun
-        float sunDot = max(dot(d, uSunDir), 0.0);
+        float sunDot = clamp(dot(d, uSunDir), 0.0, 1.0);
         float sunAbove = smoothstep(-0.14, 0.08, uSunDir.y);
         float horizonMask = smoothstep(0.52, 0.0, h);
-        c = mix(c, uSunHaze, pow(sunDot, 3.0) * (0.32 + 0.42 * horizonMask) * sunAbove);
+        c = mix(c, uSunHaze, sunDot * sunDot * sunDot * (0.32 + 0.42 * horizonMask) * sunAbove);
 
         // Extra warm painterly glow ribbon along the horizon at dawn & golden hour
-        c += uSunHaze * pow(horizonMask, 2.4) * uSunsetFactor * 0.22;
+        c += uSunHaze * safePow(horizonMask, 2.4) * uSunsetFactor * 0.22;
 
         // Crisp HDR anime sun disc + gentle painterly aura (triggers Selective Soft Bloom)
-        float aura = pow(sunDot, 20.0) * (0.38 + 0.26 * uSunsetFactor) * sunAbove;
+        float aura = safePow(sunDot, 20.0) * (0.38 + 0.26 * uSunsetFactor) * sunAbove;
         float disc = smoothstep(0.9970, 0.9990, sunDot) * 1.95 * smoothstep(-0.04, 0.06, uSunDir.y);
         vec3 sunTint = mix(vec3(1.0, 0.95, 0.80), vec3(1.0, 0.72, 0.42), uSunsetFactor * 0.85);
         c += sunTint * (aura + disc);
 
         // Luminous Anime Moon + soft cerulean lunar halo
-        float moonDot = max(dot(d, uMoonDir), 0.0);
+        float moonDot = clamp(dot(d, uMoonDir), 0.0, 1.0);
         float moonAbove = smoothstep(-0.08, 0.08, uMoonDir.y);
         float moonVis = uNightFactor * moonAbove;
-        float moonHalo = (pow(moonDot, 10.0) * 0.16 + pow(moonDot, 64.0) * 0.42) * moonVis;
+        float moonHalo = (safePow(moonDot, 10.0) * 0.16 + safePow(moonDot, 64.0) * 0.42) * moonVis;
         float moonDisc = smoothstep(0.9978, 0.9988, moonDot) * moonVis;
         // Subtle painterly mare shading inside the moon disc
         float moonTex = 0.88 + 0.12 * sin(d.x * 90.0 + d.z * 70.0) * cos(d.y * 85.0);
@@ -860,20 +862,23 @@ export class Tower {
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+        ${CEL_SAFE_MATH_GLSL}
         void main() {
           vUv = uv;
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          vN = normalize(normalMatrix * normal);
-          vV = normalize(-mv.xyz);
+          vN = safeNormalize(normalMatrix * normal);
+          vV = safeNormalize(-mv.xyz);
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: /* glsl */ `
         uniform vec3 color; uniform float time; uniform float fade;
         varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+        ${CEL_SAFE_MATH_GLSL}
         void main() {
-          float f = pow(abs(dot(normalize(vN), normalize(vV))), 1.6);
+          float f = safePow(clamp(abs(dot(safeNormalize(vN), safeNormalize(vV))), 0.0, 1.0), 1.6);
           float wave = 0.72 + 0.28 * sin(time * 1.8 - vUv.y * 6.0);
-          float a = pow(1.0 - vUv.y, 1.9) * smoothstep(0.0, 0.15, vUv.y) * f * wave * 0.42 * fade;
+          float vTop = clamp(1.0 - vUv.y, 0.0, 1.0);
+          float a = safePow(vTop, 1.9) * smoothstep(0.0, 0.15, vUv.y) * f * wave * 0.42 * fade;
           gl_FragColor = vec4(color, a);
           #include <tonemapping_fragment>
           #include <colorspace_fragment>

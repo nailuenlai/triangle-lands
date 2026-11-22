@@ -95,8 +95,35 @@ const composerTarget = new THREE.WebGLRenderTarget(1, 1, {
 const composer = new EffectComposer(renderer, composerTarget);
 composer.addPass(new RenderPass(scene, camera));
 const bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.32, 0.56, 0.98);
+// Sanitize any stray NaN/Inf HDR texels before they enter the 5-mip separable Gaussian blur
+// pyramid (where a single non-finite pixel otherwise spreads into a screen-sized white rectangle).
+bloomPass.materialHighPassFilter.fragmentShader = bloomPass.materialHighPassFilter.fragmentShader.replace(
+  'vec4 texel = texture2D( tDiffuse, vUv );',
+  /* glsl */ `
+  vec4 texel = texture2D( tDiffuse, vUv );
+  texel.rgb = vec3(
+    ( texel.r >= 0.0 && texel.r <= 65000.0 ) ? min( texel.r, 12.0 ) : 0.0,
+    ( texel.g >= 0.0 && texel.g <= 65000.0 ) ? min( texel.g, 12.0 ) : 0.0,
+    ( texel.b >= 0.0 && texel.b <= 65000.0 ) ? min( texel.b, 12.0 ) : 0.0
+  );
+  `,
+);
+bloomPass.materialHighPassFilter.needsUpdate = true;
 composer.addPass(bloomPass);
-composer.addPass(new OutputPass());
+const outputPass = new OutputPass();
+outputPass.material.fragmentShader = outputPass.material.fragmentShader.replace(
+  'gl_FragColor = texture2D( tDiffuse, vUv );',
+  /* glsl */ `
+  gl_FragColor = texture2D( tDiffuse, vUv );
+  gl_FragColor.rgb = vec3(
+    ( gl_FragColor.r >= 0.0 && gl_FragColor.r <= 65000.0 ) ? gl_FragColor.r : 0.0,
+    ( gl_FragColor.g >= 0.0 && gl_FragColor.g <= 65000.0 ) ? gl_FragColor.g : 0.0,
+    ( gl_FragColor.b >= 0.0 && gl_FragColor.b <= 65000.0 ) ? gl_FragColor.b : 0.0
+  );
+  `,
+);
+outputPass.material.needsUpdate = true;
+composer.addPass(outputPass);
 
 const sunDir = new THREE.Vector3(0.48, 0.58, 0.36).normalize();
 const hemi = new THREE.HemisphereLight('#d6eeff', '#7b6d4a', 1.4);

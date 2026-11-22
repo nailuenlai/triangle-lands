@@ -281,6 +281,17 @@ float celCloudShadow(vec2 xz, float time) {
 }
 `;
 
+export const CEL_SAFE_MATH_GLSL = /* glsl */ `
+vec3 safeNormalize(vec3 v) {
+  float lenSq = dot(v, v);
+  return lenSq > 1e-10 ? v * inversesqrt(lenSq) : vec3(0.0, 1.0, 0.0);
+}
+
+float safePow(float x, float y) {
+  return x > 1e-6 ? pow(x, y) : 0.0;
+}
+`;
+
 export const CEL_ATMOS_PARS_GLSL = /* glsl */ `
 uniform vec3 uSunDir;
 uniform vec3 uMoonDir;
@@ -297,8 +308,10 @@ vec3 applyBotwAtmosphere(vec3 col, vec3 worldPos) {
   float dist = length(toFrag);
   vec3 viewDir = toFrag / max(dist, 0.0001);
 
-  vec3 scatterDir = normalize(mix(uSunDir, uMoonDir, uNightFactor));
-  float sunScatter = pow(max(dot(viewDir, scatterDir), 0.0), 4.0);
+  vec3 scatterDir = safeNormalize(mix(uSunDir, uMoonDir, uNightFactor));
+  float sd = clamp(dot(viewDir, scatterDir), 0.0, 1.0);
+  float sd2 = sd * sd;
+  float sunScatter = sd2 * sd2;
   float horizonLift = smoothstep(0.28, -0.05, viewDir.y);
 
   // Aerial perspective: near & mid stay vivid; distant ridges layer into sky-tinted mist
@@ -306,7 +319,7 @@ vec3 applyBotwAtmosphere(vec3 col, vec3 worldPos) {
   farColor = mix(farColor, uSunHaze, sunScatter * (0.52 - 0.18 * uNightFactor));
 
   float distFactor = smoothstep(uFogNear, uFogFar, dist);
-  distFactor = pow(distFactor, 1.18);
+  distFactor = safePow(distFactor, 1.18);
   col = mix(col, farColor, distFactor * 0.88);
 
   // Delicate valley mountain mist (山嵐) settling in distant lowlands & lakes
@@ -449,7 +462,9 @@ export function createCelMaterial(opts: CelMaterialOptions = {}): THREE.MeshLamb
         #ifdef USE_INSTANCING
           celWn = mat3(instanceMatrix) * celWn;
         #endif
-        vCelWorldNormal = normalize(mat3(modelMatrix) * celWn);
+        vec3 celWnWorld = mat3(modelMatrix) * celWn;
+        float celWnLenSq = dot(celWnWorld, celWnWorld);
+        vCelWorldNormal = celWnLenSq > 1e-10 ? celWnWorld * inversesqrt(celWnLenSq) : vec3(0.0, 1.0, 0.0);
         `,
       );
 
@@ -474,7 +489,28 @@ export function createCelMaterial(opts: CelMaterialOptions = {}): THREE.MeshLamb
         varying vec3 vCelWorldPos;
         varying vec3 vCelWorldNormal;
         ${CEL_NOISE_GLSL}
+        ${CEL_SAFE_MATH_GLSL}
         ${CEL_ATMOS_PARS_GLSL}
+        `,
+      )
+      .replace(
+        '#include <normal_fragment_begin>',
+        /* glsl */ `
+        float faceDirection = gl_FrontFacing ? 1.0 : -1.0;
+        #ifdef FLAT_SHADED
+          vec3 fdx = dFdx( vViewPosition );
+          vec3 fdy = dFdy( vViewPosition );
+          vec3 flatCross = cross( fdx, fdy );
+          float flatLenSq = dot( flatCross, flatCross );
+          vec3 normal = flatLenSq > 1e-12 ? flatCross * inversesqrt( flatLenSq ) : vec3( 0.0, 0.0, 1.0 );
+        #else
+          float vNormLenSq = dot( vNormal, vNormal );
+          vec3 normal = vNormLenSq > 1e-12 ? vNormal * inversesqrt( vNormLenSq ) : vec3( 0.0, 0.0, 1.0 );
+          #ifdef DOUBLE_SIDED
+            normal *= faceDirection;
+          #endif
+        #endif
+        vec3 nonPerturbedNormal = normal;
         `,
       )
       .replace(
@@ -510,7 +546,7 @@ export function createCelMaterial(opts: CelMaterialOptions = {}): THREE.MeshLamb
           float cloudVal = mix(1.0, celCloudShadow(vCelWorldPos.xz, uTime), uCloudShadow * (1.0 - 0.5 * uNightFactor));
           float lit = celBand * castSh * cloudVal;
 
-          vec3 wNorm = normalize(vCelWorldNormal);
+          vec3 wNorm = safeNormalize(vCelWorldNormal);
           float skyFacing = wNorm.y * 0.5 + 0.5;
 
           // Hue-shifted shadow & light adapting smoothly across Dawn / Day / Sunset / Night
@@ -522,7 +558,7 @@ export function createCelMaterial(opts: CelMaterialOptions = {}): THREE.MeshLamb
           // Delicate BotW atmospheric rim light (warm gold at sunset, cool silver under moonlight)
           float ndotv = saturate(dot(geometryNormal, geometryViewDir));
           float rimGate = mix(0.22, 1.0, smoothstep(-0.20, 0.50, rawNdotL)) * mix(0.38, 1.0, castSh * cloudVal);
-          float rim = pow(1.0 - ndotv, uRimPower) * uRimStrength * rimGate;
+          float rim = safePow(1.0 - ndotv, uRimPower) * uRimStrength * rimGate;
 
           vec3 albedo = material.diffuseColor;
           if (uMossTop > 0.0) {
@@ -600,7 +636,9 @@ export function createTerrainMaterial(): THREE.MeshLambertMaterial {
         #include <worldpos_vertex>
         vec4 celWp = modelMatrix * vec4(transformed, 1.0);
         vCelWorldPos = celWp.xyz;
-        vCelWorldNormal = normalize(mat3(modelMatrix) * objectNormal);
+        vec3 celWnWorld = mat3(modelMatrix) * objectNormal;
+        float celWnLenSq = dot(celWnWorld, celWnWorld);
+        vCelWorldNormal = celWnLenSq > 1e-10 ? celWnWorld * inversesqrt(celWnLenSq) : vec3(0.0, 1.0, 0.0);
         `,
       );
 
@@ -616,7 +654,17 @@ export function createTerrainMaterial(): THREE.MeshLambertMaterial {
         varying vec3 vCelWorldPos;
         varying vec3 vCelWorldNormal;
         ${CEL_NOISE_GLSL}
+        ${CEL_SAFE_MATH_GLSL}
         ${CEL_ATMOS_PARS_GLSL}
+        `,
+      )
+      .replace(
+        '#include <normal_fragment_begin>',
+        /* glsl */ `
+        float faceDirection = gl_FrontFacing ? 1.0 : -1.0;
+        float vNormLenSq = dot( vNormal, vNormal );
+        vec3 normal = vNormLenSq > 1e-12 ? vNormal * inversesqrt( vNormLenSq ) : vec3( 0.0, 0.0, 1.0 );
+        vec3 nonPerturbedNormal = normal;
         `,
       )
       .replace(
@@ -625,7 +673,7 @@ export function createTerrainMaterial(): THREE.MeshLambertMaterial {
         #include <color_fragment>
         {
           vec3 wPos = vCelWorldPos;
-          vec3 wNrm = normalize(vCelWorldNormal);
+          vec3 wNrm = safeNormalize(vCelWorldNormal);
           float h = wPos.y;
           float ny = wNrm.y;
 
@@ -705,13 +753,13 @@ export function createTerrainMaterial(): THREE.MeshLambertMaterial {
           float cloudVal = mix(1.0, celCloudShadow(vCelWorldPos.xz, uTime), 0.36 * (1.0 - 0.5 * uNightFactor));
           float lit = celMid * castSh * cloudVal;
 
-          vec3 wNrm = normalize(vCelWorldNormal);
+          vec3 wNrm = safeNormalize(vCelWorldNormal);
           float skyFacing = wNrm.y * 0.5 + 0.5;
           vec3 shadowCol = mix(uShadowTint * 0.80, uShadowTint * 1.18, skyFacing);
           vec3 litCol = uLitTint * (1.02 + celHi);
 
           float ndotv = saturate(dot(geometryNormal, geometryViewDir));
-          float ridgeRim = pow(1.0 - ndotv, 3.4) * 0.18 * smoothstep(0.0, 0.5, rawNdotL) * castSh * cloudVal;
+          float ridgeRim = safePow(1.0 - ndotv, 3.4) * 0.18 * smoothstep(0.0, 0.5, rawNdotL) * castSh * cloudVal;
 
           reflectedLight.directDiffuse += material.diffuseColor * mix(shadowCol, litCol, lit) + uLitTint * ridgeRim * 0.30;
         }
@@ -808,6 +856,7 @@ export function createWaterMaterial(terrain: Terrain): THREE.ShaderMaterial {
       uniform float uWorldSize;
       varying vec3 vWorldPos;
       ${CEL_NOISE_GLSL}
+      ${CEL_SAFE_MATH_GLSL}
       ${CEL_ATMOS_PARS_GLSL}
 
       void main() {
@@ -858,16 +907,17 @@ export function createWaterMaterial(terrain: Terrain): THREE.ShaderMaterial {
         foam *= smoothstep(340.0, 95.0, dist);
 
         // Crisp HDR sun/moon specular sparkles (catches Selective Soft Bloom!)
-        vec3 waveN = normalize(vec3((r1 - 0.5) * 0.24, 1.0, (r2 - 0.5) * 0.24));
-        vec3 glintDir = normalize(mix(uSunDir, uMoonDir, step(0.5, uNightFactor)));
-        vec3 halfV = normalize(glintDir - viewDir);
-        float spec = pow(max(dot(waveN, halfV), 0.0), 85.0);
+        vec3 waveN = safeNormalize(vec3((r1 - 0.5) * 0.24, 1.0, (r2 - 0.5) * 0.24));
+        vec3 glintDir = safeNormalize(mix(uSunDir, uMoonDir, step(0.5, uNightFactor)));
+        vec3 halfV = safeNormalize(glintDir - viewDir);
+        float spec = safePow(clamp(dot(waveN, halfV), 0.0, 1.0), 85.0);
         float celSpec = smoothstep(0.30, 0.54, spec) * cSh;
         vec3 glintCol = mix(uSunHaze * 1.45, vec3(0.85, 1.15, 1.55), uNightFactor);
         waterCol += glintCol * celSpec;
 
         // Grazing Fresnel sky reflection
-        float fresnel = pow(1.0 - max(dot(vec3(0.0, 1.0, 0.0), -viewDir), 0.0), 3.0);
+        float fresnelBase = clamp(1.0 - clamp(-viewDir.y, 0.0, 1.0), 0.0, 1.0);
+        float fresnel = fresnelBase * fresnelBase * fresnelBase;
         vec3 skyRefl = mix(uAerialBlue, uSkyHorizon, 0.52);
         waterCol = mix(waterCol, skyRefl, fresnel * 0.44);
 
@@ -912,7 +962,9 @@ export function createCloudMaterial(): THREE.ShaderMaterial {
       void main() {
         vec4 wp = modelMatrix * vec4(position, 1.0);
         vWorldPos = wp.xyz;
-        vWorldNormal = normalize(mat3(modelMatrix) * normal);
+        vec3 wn = mat3(modelMatrix) * normal;
+        float wnLenSq = dot(wn, wn);
+        vWorldNormal = wnLenSq > 1e-10 ? wn * inversesqrt(wnLenSq) : vec3(0.0, 1.0, 0.0);
         gl_Position = projectionMatrix * viewMatrix * wp;
       }
     `,
@@ -926,11 +978,15 @@ export function createCloudMaterial(): THREE.ShaderMaterial {
       uniform vec3 uCloudBottom;
       varying vec3 vWorldPos;
       varying vec3 vWorldNormal;
+      ${CEL_SAFE_MATH_GLSL}
 
       void main() {
-        vec3 n = normalize(vWorldNormal);
-        vec3 v = normalize(cameraPosition - vWorldPos);
-        vec3 lDir = normalize(mix(uSunDir, uMoonDir, uNightFactor));
+        vec3 n = safeNormalize(vWorldNormal);
+        vec3 toFrag = vWorldPos - cameraPosition;
+        float dist = length(toFrag);
+        vec3 viewDir = toFrag / max(dist, 0.0001);
+        vec3 v = -viewDir;
+        vec3 lDir = safeNormalize(mix(uSunDir, uMoonDir, uNightFactor));
         float ndotl = dot(n, lDir);
         float up = n.y * 0.5 + 0.5;
 
@@ -941,11 +997,11 @@ export function createCloudMaterial(): THREE.ShaderMaterial {
         vec3 col = mix(underside, crown, cel);
 
         // Silver-lining / sunset gold rim toward sun or moon
-        float rim = pow(1.0 - max(dot(n, v), 0.0), 2.3);
-        float sunSide = smoothstep(-0.1, 0.7, dot(normalize(vWorldPos - cameraPosition), lDir));
+        float ndotv = clamp(dot(n, v), 0.0, 1.0);
+        float rim = safePow(1.0 - ndotv, 2.3);
+        float sunSide = smoothstep(-0.1, 0.7, dot(viewDir, lDir));
         col += uSunHaze * rim * (0.14 + 0.30 * sunSide);
 
-        float dist = length(vWorldPos - cameraPosition);
         float farFade = smoothstep(580.0, 260.0, dist);
         col = mix(uSkyHorizon, col, smoothstep(660.0, 340.0, dist));
 
@@ -986,7 +1042,9 @@ export function createSubtleOutlineMaterial(thickness = 0.02, color = '#2a334a')
         vec4 wp0 = modelMatrix * vec4(position, 1.0);
         vDist = length(wp0.xyz - cameraPosition);
         float t = uThickness * clamp(vDist * 0.085, 0.65, 1.4);
-        vec3 extruded = position + normalize(normal) * t;
+        float nLenSq = dot(normal, normal);
+        vec3 nDir = nLenSq > 1e-10 ? normal * inversesqrt(nLenSq) : vec3(0.0, 1.0, 0.0);
+        vec3 extruded = position + nDir * t;
         vec4 wp = modelMatrix * vec4(extruded, 1.0);
         vWorldPos = wp.xyz;
         gl_Position = projectionMatrix * viewMatrix * wp;
@@ -996,6 +1054,7 @@ export function createSubtleOutlineMaterial(thickness = 0.02, color = '#2a334a')
       uniform vec3 uColor;
       varying vec3 vWorldPos;
       varying float vDist;
+      ${CEL_SAFE_MATH_GLSL}
       ${CEL_ATMOS_PARS_GLSL}
       void main() {
         float alpha = 0.48 * smoothstep(38.0, 12.0, vDist);
@@ -1075,6 +1134,7 @@ export function createGrassMaterial(isFlower = false): THREE.ShaderMaterial {
       varying float vTip;
       varying float vGust;
       ${CEL_NOISE_GLSL}
+      ${CEL_SAFE_MATH_GLSL}
       ${CEL_ATMOS_PARS_GLSL}
 
       void main() {

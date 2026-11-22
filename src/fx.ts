@@ -236,7 +236,8 @@ export class AmbientMotes {
           float nearFade = smoothstep(1.2, 4.2, camDist);
 
           // Night fireflies pulse slowly & luminously; daytime pollen twinkles softly
-          float fireflyPulse = 0.25 + 0.75 * pow(0.5 + 0.5 * sin(uTime * (1.6 + sp * 1.1) + ph * 3.0), 2.2);
+          float pulseBase = clamp(0.5 + 0.5 * sin(uTime * (1.6 + sp * 1.1) + ph * 3.0), 0.0, 1.0);
+          float fireflyPulse = 0.25 + 0.75 * (pulseBase > 1e-6 ? pow(pulseBase, 2.2) : 0.0);
           float dayTwinkle = 0.55 + 0.45 * sin(uTime * 1.8 + ph * 2.0);
           vPulse = mix(dayTwinkle, fireflyPulse, uNightFactor);
 
@@ -258,7 +259,8 @@ export class AmbientMotes {
           float d = length(gl_PointCoord - 0.5) * 2.0;
           if (d > 1.0) discard;
           float core = smoothstep(0.55, 0.0, d);
-          float halo = pow(1.0 - d, 2.2);
+          float haloBase = clamp(1.0 - d, 0.0, 1.0);
+          float halo = haloBase > 1e-6 ? pow(haloBase, 2.2) : 0.0;
           float a = (halo * 0.65 + core * 0.85) * vAlpha;
           if (a < 0.004) discard;
 
