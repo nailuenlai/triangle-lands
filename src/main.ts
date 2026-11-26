@@ -900,21 +900,31 @@ function lineOfSight(from: THREE.Vector3, to: THREE.Vector3): boolean {
 
 let discoverTimer = 0;
 function checkDiscovery(dt: number) {
+  if (introSwoop) return;
   discoverTimer -= dt;
   if (discoverTimer > 0) return;
   discoverTimer = 0.25;
+  const inViewAndVisible = (pt: THREE.Vector3): boolean => {
+    ndc.copy(pt).project(camera);
+    if (Math.abs(ndc.x) > 0.88 || Math.abs(ndc.y) > 0.88 || ndc.z <= 0 || ndc.z > 1) return false;
+    return lineOfSight(camera.position, pt);
+  };
   for (const t of towers) {
     if (t.discovered) continue;
     const playerDist = Math.hypot(t.def.x - player.pos.x, t.def.z - player.pos.z);
-    if (playerDist > 84) continue;
-    const p = new THREE.Vector3(t.def.x, t.base + 3.6, t.def.z);
-    ndc.copy(p).project(camera);
-    if (Math.abs(ndc.x) > 0.88 || Math.abs(ndc.y) > 0.88 || ndc.z <= 0 || ndc.z > 1) continue;
-    if (!lineOfSight(camera.position, p)) continue;
+    if (playerDist > 210) continue;
+    const altarPt = new THREE.Vector3(t.def.x, t.base + 3.6, t.def.z);
+    const plumePt = new THREE.Vector3(t.def.x, t.base + 16.0, t.def.z);
+    const seenPt = inViewAndVisible(altarPt)
+      ? altarPt
+      : (!t.activated && inViewAndVisible(plumePt))
+        ? plumePt
+        : null;
+    if (!seenPt) continue;
     t.discovered = true;
     audio.playDiscover();
-    sparkles.burst(p, 32, '#ffc966', 6, 0.55, 1.2, 0.5);
-    spawnPickupRipple(p, '#ffc966', 4.0);
+    sparkles.burst(seenPt, 32, '#ffc966', 6, 0.55, 1.2, 0.5);
+    spawnPickupRipple(seenPt, '#ffc966', 4.0);
     const marker = towerCompassEls[t.index];
     if (marker) pingEl(marker, 'ping');
     wakeHud(4200);
@@ -1577,6 +1587,7 @@ function frame() {
       for (const c of courses) c.update(elapsed, dt, new THREE.Vector3(0, -9999, 0));
       actionCueEl.classList.remove('show');
       if (state === 'vista') {
+        checkDiscovery(dt);
         checkMoments(dt);
         if (input.action || input.jump || Math.hypot(input.move.x, input.move.y) > 0.18) {
           exitVista();
@@ -1659,7 +1670,8 @@ function frame() {
     ambientMotes.update(focusPos, dt, curBiomeWeights);
   }
 
-  towers.forEach((t) => t.update(elapsed, dt, player.pos, state === 'title'));
+  const viewerPos = camOverride ? camOverride.pos : player.pos;
+  towers.forEach((t) => t.update(elapsed, dt, viewerPos, state === 'title'));
   wonders.forEach((w) => w.update(elapsed));
   updrafts.forEach((u) => u.update(elapsed, dt, sparkles, state === 'title' ? camera.position : player.pos));
   birdFlocks.update(elapsed);

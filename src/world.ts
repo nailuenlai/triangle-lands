@@ -1320,6 +1320,81 @@ function radialTexture(): THREE.Texture {
   return t;
 }
 let glowTex: THREE.Texture | null = null;
+let smokeOuterGeo: THREE.CylinderGeometry | null = null;
+let smokeInnerGeo: THREE.CylinderGeometry | null = null;
+
+/** Organic wind-swaying spirit smoke rising from unactivated shrines so ridges hide the altar while revealing a subtle distant cue. */
+function createSpiritSmokeMaterial(seed: number): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    fog: false,
+    uniforms: {
+      uTime: celUniforms.uTime,
+      uNightFactor: celUniforms.uNightFactor,
+      uSunsetFactor: celUniforms.uSunsetFactor,
+      uSeed: { value: seed },
+      uFade: { value: 1.0 },
+      uBaseColor: { value: new THREE.Color('#fff2d4') },
+      uWarmColor: { value: new THREE.Color('#ffaa52') },
+    },
+    vertexShader: /* glsl */ `
+      uniform float uTime;
+      uniform float uSeed;
+      varying vec2 vUv;
+      varying vec3 vN;
+      varying vec3 vV;
+      ${CEL_SAFE_MATH_GLSL}
+      void main() {
+        vUv = uv;
+        vec3 pos = position;
+        float h = clamp(uv.y, 0.0, 1.0);
+        float swayX = sin(uTime * 0.72 - h * 4.4 + uSeed) * 2.1 + sin(uTime * 1.25 - h * 7.8 + uSeed * 1.7) * 0.65;
+        float swayZ = cos(uTime * 0.58 - h * 3.9 + uSeed * 1.3) * 1.65;
+        float spread = h * h;
+        pos.x += swayX * spread;
+        pos.z += swayZ * spread;
+        float puff = 1.0 + 0.24 * sin(h * 11.0 - uTime * 1.4 + uSeed);
+        pos.xz *= puff;
+
+        vec4 mv = modelViewMatrix * vec4(pos, 1.0);
+        vN = safeNormalize(normalMatrix * normal);
+        vV = safeNormalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform float uNightFactor;
+      uniform float uSunsetFactor;
+      uniform float uSeed;
+      uniform float uFade;
+      uniform vec3 uBaseColor;
+      uniform vec3 uWarmColor;
+      varying vec2 vUv;
+      varying vec3 vN;
+      varying vec3 vV;
+      ${CEL_SAFE_MATH_GLSL}
+      void main() {
+        float h = clamp(vUv.y, 0.0, 1.0);
+        float facing = clamp(abs(dot(safeNormalize(vN), safeNormalize(vV))), 0.0, 1.0);
+        float softEdge = safePow(facing, 1.35);
+
+        float a1 = sin(vUv.x * 12.566 + h * 7.0 - uTime * 0.95 + uSeed) * 0.5 + 0.5;
+        float a2 = sin(vUv.x * 18.849 - h * 11.0 - uTime * 1.35 + uSeed * 2.1) * 0.5 + 0.5;
+        float wisp = 0.45 + 0.55 * (a1 * 0.62 + a2 * 0.38);
+
+        float vEnv = smoothstep(0.0, 0.14, h) * safePow(clamp(1.0 - h, 0.0, 1.0), 1.35);
+        vec3 col = mix(uWarmColor, uBaseColor, smoothstep(0.05, 0.62, h));
+        col *= 1.0 + uNightFactor * 0.48 + uSunsetFactor * 0.24;
+
+        float alpha = vEnv * softEdge * wisp * (0.44 + 0.14 * uNightFactor) * uFade;
+        gl_FragColor = vec4(col, alpha);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
+  });
+}
 
 export class Tower {
   readonly group = new THREE.Group();
@@ -1342,6 +1417,10 @@ export class Tower {
   private glow: THREE.Sprite;
   private wisp: THREE.Mesh;
   private wispMat: THREE.ShaderMaterial;
+  private smokeGroup: THREE.Group;
+  private smokeMat: THREE.ShaderMaterial;
+  private smokeSeed: number;
+  private embers: { sprite: THREE.Sprite; phase: number; radius: number; speed: number }[] = [];
   private motes: { mesh: THREE.Mesh; phase: number; radius: number; speed: number }[] = [];
   private moteMat: THREE.MeshBasicMaterial;
   private ring: THREE.Mesh;
@@ -1510,6 +1589,50 @@ export class Tower {
     this.wisp.position.y = 2.6;
     this.group.add(this.wisp);
 
+    // Tall organic swaying spirit-smoke plume for unactivated shrines (peeks naturally above triangular slopes)
+    smokeOuterGeo ??= (() => {
+      const g = new THREE.CylinderGeometry(3.2, 0.95, 38, 16, 20, true);
+      g.translate(0, 19, 0);
+      return g;
+    })();
+    smokeInnerGeo ??= (() => {
+      const g = new THREE.CylinderGeometry(1.5, 0.48, 30, 12, 16, true);
+      g.translate(0, 15, 0);
+      return g;
+    })();
+    this.smokeSeed = index * 1.9 + 0.7;
+    this.smokeMat = createSpiritSmokeMaterial(this.smokeSeed);
+    this.smokeGroup = new THREE.Group();
+    const smokeOuter = new THREE.Mesh(smokeOuterGeo, this.smokeMat);
+    smokeOuter.position.y = 2.8;
+    smokeOuter.renderOrder = 4;
+    const smokeInner = new THREE.Mesh(smokeInnerGeo, this.smokeMat);
+    smokeInner.position.y = 2.6;
+    smokeInner.rotation.y = 1.6;
+    smokeInner.renderOrder = 4;
+    this.smokeGroup.add(smokeOuter, smokeInner);
+
+    for (let i = 0; i < 8; i++) {
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: glowTex,
+        color: new THREE.Color('#ffd380').multiplyScalar(1.35),
+        blending: THREE.AdditiveBlending,
+        transparent: true,
+        depthWrite: false,
+        opacity: 0.7,
+        fog: false,
+      }));
+      sprite.scale.setScalar(1.4);
+      this.smokeGroup.add(sprite);
+      this.embers.push({
+        sprite,
+        phase: (i / 8) * Math.PI * 2 + index * 0.7,
+        radius: 0.9 + (i % 3) * 0.75,
+        speed: 0.14 + (i % 4) * 0.03,
+      });
+    }
+    this.group.add(this.smokeGroup);
+
     // Drifting firefly-like light motes rising around the altar
     this.moteMat = new THREE.MeshBasicMaterial({
       color: COLORS.inactive.clone(), transparent: true, opacity: 0.85, fog: false,
@@ -1564,18 +1687,13 @@ export class Tower {
   update(t: number, dt: number, playerPos: THREE.Vector3, inTitle = false) {
     const dist = Math.hypot(playerPos.x - this.def.x, playerPos.z - this.def.z);
 
-    // Proximity emergence: hidden in distant wilderness, materializing out of the mist up close
-    const stoneFade = inTitle && !this.activated
-      ? 0
-      : this.activated
-        ? smoothstep(185, 128, dist)
-        : smoothstep(116, 76, dist);
-
+    // Let terrain slopes and regional atmospheric fog hide/reveal shrines naturally (no hard distance pop-in)
+    const stoneFade = inTitle && !this.activated ? 0 : 1;
     const glowFade = inTitle && !this.activated
       ? 0
       : this.activated
-        ? smoothstep(155, 92, dist)
-        : smoothstep(96, 52, dist);
+        ? 0.35 + 0.65 * smoothstep(220, 80, dist)
+        : 0.28 + 0.72 * smoothstep(220, 65, dist);
 
     this.group.visible = stoneFade > 0.005 || this.ringT >= 0;
     if (!this.group.visible) return;
@@ -1611,7 +1729,7 @@ export class Tower {
     this.haloA.visible = lumVisible;
     this.haloB.visible = lumVisible;
     this.glow.visible = lumVisible;
-    this.wisp.visible = lumVisible;
+    this.wisp.visible = lumVisible && this.activated;
 
     this.crystalMat.opacity = glowFade * 0.95;
     this.haloMat.opacity = glowFade * (0.55 + nearBoost * 0.3);
@@ -1620,7 +1738,28 @@ export class Tower {
     this.moteMat.opacity = glowFade * 0.85;
 
     this.wispMat.uniforms.time.value = t;
-    this.wispMat.uniforms.fade.value = glowFade * (this.activated ? 0.75 : 1.0);
+    this.wispMat.uniforms.fade.value = glowFade * 0.75;
+
+    // Unactivated shrines breathe a tall swaying spirit-smoke plume that peeks over distant ridges
+    const showSmoke = !inTitle && !this.activated;
+    this.smokeGroup.visible = showSmoke;
+    if (showSmoke) {
+      const farFade = smoothstep(460, 240, dist);
+      const nearSoft = 0.62 + 0.38 * smoothstep(18, 65, dist);
+      this.smokeMat.uniforms.uFade.value = farFade * nearSoft;
+      for (let i = 0; i < this.embers.length; i++) {
+        const em = this.embers[i];
+        const p = ((t * em.speed + em.phase) % 1 + 1) % 1;
+        const ang = em.phase + t * 0.45 + p * 3.0;
+        const swayX = Math.sin(t * 0.72 - p * 4.4 + this.smokeSeed) * 1.9 * p * p;
+        const swayZ = Math.cos(t * 0.58 - p * 3.9 + this.smokeSeed) * 1.4 * p * p;
+        const r = em.radius * (0.7 + p * 1.4);
+        em.sprite.position.set(Math.cos(ang) * r + swayX, 3.2 + p * 26, Math.sin(ang) * r + swayZ);
+        const env = Math.sin(p * Math.PI);
+        em.sprite.scale.setScalar((0.9 + env * 1.35) * (0.8 + smoothstep(60, 220, dist) * 0.7));
+        em.sprite.material.opacity = env * 0.65 * farFade;
+      }
+    }
 
     for (let i = 0; i < this.motes.length; i++) {
       const m = this.motes[i];
