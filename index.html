@@ -7,29 +7,42 @@
     <meta name="theme-color" content="#dfeeee" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="description" content="三角之境：一款以地形探索為核心的低多邊形 3D 網頁遊戲。攀岩、滑翔、乘上升氣流、挑戰風之試煉、收集靈光，尋訪隱於霧中的古碑。" />
-    <title>三角之境 · Triangle Lands</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&display=swap"
-      rel="stylesheet"
-    />
+    <title>△</title>
   </head>
   <body>
-    <canvas id="scene" aria-label="遊戲畫面"></canvas>
+    <canvas id="scene"></canvas>
     <div id="touch-layer"></div>
 
     <div id="speedlines" class="speedlines" aria-hidden="true"></div>
+    <div id="exhaust-vignette" class="exhaust-vignette" aria-hidden="true"></div>
+
+    <div id="letterbox" class="letterbox" aria-hidden="true">
+      <div class="lb-bar lb-top"></div>
+      <div class="lb-bar lb-bot"></div>
+    </div>
+
+    <div id="moment-frame" class="moment-frame" aria-hidden="true">
+      <i class="mf-corner mf-tl"></i>
+      <i class="mf-corner mf-tr"></i>
+      <i class="mf-corner mf-bl"></i>
+      <i class="mf-corner mf-br"></i>
+      <div class="mf-flash"></div>
+    </div>
+
     <div id="hud" hidden>
       <div class="hud-top">
-        <div class="hud-left">
-          <div class="pill tower-count" title="已共鳴的古碑">
+        <div id="hud-left" class="hud-left">
+          <div id="tower-count" class="pill tower-count">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.6 3.5L12 9 9.4 5.5zM7 21l2.4-10h5.2L17 21z" /></svg>
             <span id="tower-count-num">0</span><span class="of">/ 6</span>
           </div>
-          <div id="orb-count" class="pill orb-count" title="收集的靈光">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8.5 15h-17z" /></svg>
+          <div id="orb-count" class="pill orb-count">
+            <span class="orb-ring-wrap" aria-hidden="true">
+              <svg class="orb-ring" viewBox="0 0 32 32">
+                <g id="orb-ring-segs" fill="none" stroke-width="2.4" stroke-linecap="round"></g>
+              </svg>
+              <svg class="orb-icon" viewBox="0 0 24 24"><path d="M12 4l7.5 13.5h-15z" /></svg>
+            </span>
             <span id="orb-count-num">0</span><span id="orb-count-total" class="of">/ 0</span>
           </div>
         </div>
@@ -38,16 +51,27 @@
           <div class="compass-needle"></div>
         </div>
         <div class="hud-right">
-          <button id="btn-time" class="pill icon-btn" aria-label="切換時辰" title="切換時辰 (T)">
-            <svg id="icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+          <button id="btn-time" class="pill icon-btn" type="button">
+            <svg id="icon-time-morning" viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="12" cy="12" r="4" />
               <path d="M12 2.5v2.2M12 19.3v2.2M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.9 19.1l1.6-1.6M17.5 6.5l1.6-1.6" />
             </svg>
-            <svg id="icon-moon" viewBox="0 0 24 24" aria-hidden="true" hidden>
-              <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.6 6.6 0 0 0 10.5 10.5z" />
+            <svg id="icon-time-sunset" viewBox="0 0 24 24" aria-hidden="true" hidden>
+              <path d="M3 16.5h18" />
+              <path d="M6.5 16.5a5.5 5.5 0 0 1 11 0" />
+              <path d="M12 5.5v3M6.2 8.2l2 2M17.8 8.2l-2 2M7 20h10" />
+            </svg>
+            <svg id="icon-time-night" viewBox="0 0 24 24" aria-hidden="true" hidden>
+              <path d="M19.5 14.5A8 8 0 1 1 9.5 4.5a6.4 6.4 0 0 0 10 10z" />
+              <path d="M17.5 5.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z" fill="currentColor" stroke="none" />
+            </svg>
+            <svg id="icon-time-dawn" viewBox="0 0 24 24" aria-hidden="true" hidden>
+              <path d="M3 17h18" />
+              <path d="M7 17a5 5 0 0 1 10 0" />
+              <path d="M12 4.5v4.5M9.8 6.8 12 4.5l2.2 2.3M5.5 11.5l1.8 1.2M18.5 11.5l-1.8 1.2" />
             </svg>
           </button>
-          <button id="btn-audio" class="pill icon-btn" aria-label="切換背景音效" title="切換背景音效">
+          <button id="btn-audio" class="pill icon-btn" type="button">
             <svg id="icon-audio-on" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M11 5L6 9H3v6h3l5 4V5z" />
               <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />
@@ -57,75 +81,202 @@
               <path d="M22 9l-6 6M16 9l6 6" />
             </svg>
           </button>
-          <button id="btn-map" class="pill icon-btn" aria-label="開啟地圖" title="大地圖 (M)">
+          <button id="btn-map" class="pill icon-btn" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2zM9 4v14M15 6v14" /></svg>
           </button>
         </div>
       </div>
 
-      <div id="trial" class="trial" aria-live="polite">
-        <div class="trial-head"><span id="trial-name"></span><b id="trial-count"></b></div>
+      <div id="trial" class="trial" aria-hidden="true">
+        <div class="trial-head">
+          <div id="trial-dots" class="trial-dots"></div>
+          <b id="trial-count"></b>
+        </div>
         <div class="trial-track"><div id="trial-bar" class="trial-bar"></div></div>
       </div>
 
       <div id="stamina" class="stamina" aria-hidden="true">
         <svg><circle id="stamina-bg" class="st-bg" /><circle id="stamina-fg" class="st-fg" /></svg>
       </div>
-      <div id="float-layer" class="float-layer" aria-hidden="true"></div>
-      <div id="glide-hint" class="glide-hint"></div>
+      <div id="fx-layer" class="fx-layer" aria-hidden="true"></div>
+
+      <div id="action-cue" class="action-cue" aria-hidden="true">
+        <svg id="cue-glide" viewBox="0 0 48 36">
+          <path d="M24 5 44 25 24 19 4 25Z" fill="rgba(255,226,122,0.22)" stroke="#ffe27a" stroke-width="2" stroke-linejoin="round" />
+          <path d="M24 19v9M18 27l6 4 6-4" fill="none" stroke="#ffe27a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" opacity="0.7" />
+        </svg>
+        <svg id="cue-updraft" viewBox="0 0 48 44" hidden>
+          <path d="M24 6 42 22 24 17 6 22Z" fill="rgba(165,244,255,0.24)" stroke="#aef4ff" stroke-width="2" stroke-linejoin="round" />
+          <path d="M17 31l7-6 7 6M17 38l7-6 7 6" fill="none" stroke="#aef4ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </div>
 
       <div id="joystick" class="joystick"><div id="joy-knob" class="joy-knob"></div></div>
 
       <div class="hud-actions">
-        <button id="btn-interact" class="action-btn interact" hidden>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l4.5 6.5L12 16 7.5 9.5zM5 19.5c2.2-1.6 4.5-2.4 7-2.4s4.8.8 7 2.4" /></svg>
-          <span id="btn-interact-label">共鳴</span>
+        <button id="btn-interact" class="action-btn interact" type="button" hidden>
+          <svg id="icon-resonate" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3l4.2 6.2L12 15.5 7.8 9.2z" />
+            <path d="M5.2 19.2c2.1-1.5 4.4-2.2 6.8-2.2s4.7.7 6.8 2.2" />
+            <path d="M8.5 16.3a6.5 6.5 0 0 1 7 0" opacity="0.65" />
+          </svg>
+          <svg id="icon-vista" viewBox="0 0 24 24" aria-hidden="true" hidden>
+            <path d="M2.5 12s3.8-6 9.5-6 9.5 6 9.5 6-3.8 6-9.5 6-9.5-6-9.5-6z" />
+            <circle cx="12" cy="12" r="2.6" />
+          </svg>
+          <svg id="icon-return" viewBox="0 0 24 24" aria-hidden="true" hidden>
+            <path d="M6 9l6 6 6-6" />
+            <path d="M6 15.5h12" opacity="0.6" />
+          </svg>
         </button>
         <div class="action-row">
-          <button id="btn-sprint" class="action-btn sprint" aria-label="衝刺（按住）">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7l5 5-5 5M12 7l5 5-5 5" /></svg>
+          <button id="btn-sprint" class="action-btn sprint" type="button">
+            <svg id="icon-sprint" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7l5 5-5 5M12 7l5 5-5 5" /></svg>
+            <svg id="icon-dive" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="M7 6l5 5 5-5M7 13l5 5 5-5" /></svg>
           </button>
-          <button id="btn-jump" class="action-btn jump" aria-label="跳躍 / 滑翔">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 15l7-7 7 7" /></svg>
+          <button id="btn-jump" class="action-btn jump" type="button">
+            <svg id="icon-jump" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 15l7-7 7 7" /></svg>
+            <svg id="icon-glide" viewBox="0 0 24 24" aria-hidden="true" hidden>
+              <path d="M12 5 21 16 12 13 3 16Z" />
+              <path d="M12 13v6" opacity="0.7" />
+            </svg>
+            <svg id="icon-leap" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="M6 17l6-6 6 6M6 11l6-6 6 6" /></svg>
           </button>
         </div>
       </div>
 
-      <div id="region-banner" class="region-banner" aria-live="polite" aria-hidden="true">
-        <span id="region-tag" class="region-tag" hidden>新的地域</span>
+      <div id="region-banner" class="region-banner" aria-hidden="true">
+        <svg id="region-crown" class="region-crown" viewBox="0 0 24 14" hidden>
+          <path d="M12 1l4 6-4 6-4-6z" fill="#ffe7a8" />
+          <circle cx="4" cy="7" r="1.4" fill="#ffe7a8" opacity="0.8" />
+          <circle cx="20" cy="7" r="1.4" fill="#ffe7a8" opacity="0.8" />
+        </svg>
         <div class="region-title-row">
           <i class="region-rule"></i>
-          <strong id="region-name"></strong>
+          <div id="region-emblem" class="region-emblem"></div>
           <i class="region-rule"></i>
         </div>
-        <p id="region-sub" class="region-sub"></p>
       </div>
-      <div id="toast" class="toast" role="status" aria-live="polite"></div>
-      <div id="hint" class="hint">
-        <span class="touch-only">左側拖曳移動 · 右側拖曳視角 · 推向岩壁即可攀爬 · 空中再按跳躍滑翔</span>
-        <span class="desk-only">WASD 移動 · Shift 衝刺 · 空白鍵跳躍／空中展開滑翔翼 · 推向岩壁攀爬 · E 共鳴 · M 地圖 · T 切換時辰</span>
+
+      <div id="onboard-hint" class="onboard-hint" aria-hidden="true">
+        <div class="ob-touch touch-only">
+          <div class="ob-joy">
+            <span class="ob-ring"></span>
+            <span class="ob-dot"></span>
+          </div>
+          <div class="ob-look">
+            <svg viewBox="0 0 64 36">
+              <path d="M10 22Q32 8 54 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 4" />
+              <path d="M48 16l6 6-8 1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <span class="ob-swipe-dot"></span>
+          </div>
+        </div>
+        <div class="ob-desk desk-only">
+          <div class="ob-keys">
+            <span class="ob-key ob-k-up"><svg viewBox="0 0 16 16"><path d="M4 10l4-4 4 4" /></svg></span>
+            <span class="ob-key ob-k-left"><svg viewBox="0 0 16 16"><path d="M10 4l-4 4 4 4" /></svg></span>
+            <span class="ob-key ob-k-down"><svg viewBox="0 0 16 16"><path d="M4 6l4 4 4-4" /></svg></span>
+            <span class="ob-key ob-k-right"><svg viewBox="0 0 16 16"><path d="M6 4l4 4-4 4" /></svg></span>
+          </div>
+          <div class="ob-space">
+            <svg viewBox="0 0 40 16"><path d="M14 11l6-6 6 6" /></svg>
+          </div>
+          <div class="ob-mouse">
+            <svg viewBox="0 0 28 32">
+              <rect x="6" y="4" width="16" height="24" rx="8" />
+              <path d="M14 4v9M6 13h16" />
+              <path d="M1 16l3-2.5v5zM27 16l-3-2.5v5z" fill="currentColor" stroke="none" opacity="0.7" />
+            </svg>
+          </div>
+        </div>
       </div>
     </div>
 
     <div id="map-overlay" class="map-overlay" hidden>
       <div class="map-sheet">
         <header class="map-head">
-          <h2>大地圖</h2>
-          <p id="map-progress"></p>
+          <div class="map-stats">
+            <span class="m-stat m-tower">
+              <svg viewBox="0 0 24 24"><path d="M12 2l2.6 3.5L12 9 9.4 5.5zM7 21l2.4-10h5.2L17 21z" /></svg>
+              <span id="ms-tower">0/6</span>
+            </span>
+            <span class="m-stat m-orb">
+              <svg viewBox="0 0 24 24"><path d="M12 4l8 14H4z" /></svg>
+              <span id="ms-orb">0/0</span>
+            </span>
+            <span class="m-stat m-wonder">
+              <svg viewBox="0 0 24 24"><path d="M12 2l2.8 7.2L22 12l-7.2 2.8L12 22l-2.8-7.2L2 12l7.2-2.8z" /></svg>
+              <span id="ms-wonder">0/6</span>
+            </span>
+            <span class="m-stat m-moment">
+              <svg viewBox="0 0 24 24"><path d="M18.5 14.5A7.5 7.5 0 1 1 9.5 5.5a6 6 0 0 0 9 9z" /></svg>
+              <span id="ms-moment">0/5</span>
+            </span>
+            <span class="m-stat m-trial">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="2.6" /></svg>
+              <span id="ms-trial">0/5</span>
+            </span>
+          </div>
+          <button id="btn-map-close" class="map-close" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+          </button>
         </header>
         <canvas id="map-canvas" class="map-canvas"></canvas>
-        <button id="btn-map-close" class="map-close" aria-label="關閉地圖">關閉</button>
       </div>
     </div>
 
     <section id="title-screen" class="title-screen">
       <div class="title-inner">
-        <p class="eyebrow">Triangle Lands</p>
-        <h1>三角之境</h1>
-        <p class="lede">攀上群峰，乘風滑翔，追逐金色靈光。<br />尋訪隱於霧中的古碑，描繪大地之貌。</p>
+        <div class="title-emblem" aria-hidden="true">
+          <svg viewBox="0 0 220 185">
+            <defs>
+              <linearGradient id="tri-gold" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#fffdf5" />
+                <stop offset="65%" stop-color="#f7e6bf" />
+                <stop offset="100%" stop-color="#d8b982" />
+              </linearGradient>
+              <linearGradient id="tri-cyan" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#aef4ff" />
+                <stop offset="100%" stop-color="#4fe3ff" />
+              </linearGradient>
+              <filter id="tri-glow" x="-30%" y="-30%" width="160%" height="160%">
+                <feGaussianBlur stdDeviation="3.5" result="b" />
+                <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+              </filter>
+            </defs>
+            <!-- Subtle celestial horizon arc -->
+            <path d="M34 128 A86 86 0 0 1 186 128" fill="none" stroke="rgba(255,248,230,0.34)" stroke-width="1.2" stroke-dasharray="3 5" />
+            <!-- Distant twin low-poly flank peaks -->
+            <path d="M22 146 66 84 102 146Z" fill="rgba(255,250,238,0.16)" stroke="rgba(255,250,238,0.52)" stroke-width="1.4" stroke-linejoin="round" />
+            <path d="M118 146 154 84 198 146Z" fill="rgba(255,250,238,0.16)" stroke="rgba(255,250,238,0.52)" stroke-width="1.4" stroke-linejoin="round" />
+            <!-- Central grand mountain triangle -->
+            <path d="M52 152 110 42 168 152Z" fill="rgba(255,250,238,0.14)" stroke="url(#tri-gold)" stroke-width="2.4" stroke-linejoin="round" filter="url(#tri-glow)" />
+            <!-- Inner faceted shadow / ridge line -->
+            <path d="M110 42 110 152M110 42 139 152" fill="none" stroke="rgba(255,248,228,0.36)" stroke-width="1.1" />
+            <!-- Floating resonant crystal diamond at the apex -->
+            <path class="emblem-crystal" d="M110 12 117 24 110 36 103 24Z" fill="url(#tri-cyan)" filter="url(#tri-glow)" />
+            <!-- Flowing wind ribbon across the peaks -->
+            <path d="M18 152 Q110 140 202 152" fill="none" stroke="rgba(255,248,228,0.6)" stroke-width="1.3" stroke-linecap="round" />
+            <!-- Small golden spirit-orb accents -->
+            <path d="M66 64 70 71 62 71Z" fill="#ffe27a" opacity="0.9" />
+            <path d="M154 64 158 71 150 71Z" fill="#ffe27a" opacity="0.9" />
+          </svg>
+          <div id="title-progress" class="title-progress" hidden></div>
+        </div>
         <div class="title-actions">
-          <button id="btn-start" class="btn-primary">開始探索</button>
-          <button id="btn-reset" class="btn-ghost" hidden>重置進度</button>
+          <button id="btn-start" class="btn-primary" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.2 5.4 19.2 12 8.2 18.6Z" /></svg>
+          </button>
+          <button id="btn-reset" class="btn-ghost" type="button" hidden>
+            <svg class="icon-reset-idle" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4.5 12a7.5 7.5 0 1 1 2.2 5.3" />
+              <path d="M4.5 7v5h5" />
+            </svg>
+            <svg class="icon-reset-confirm" viewBox="0 0 24 24" aria-hidden="true" hidden>
+              <path d="M5 13l4.5 4.5L19 7.5" />
+            </svg>
+          </button>
         </div>
       </div>
     </section>

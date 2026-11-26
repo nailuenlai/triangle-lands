@@ -286,9 +286,15 @@ export class GameMap {
     ctx.moveTo(0, 18); ctx.lineTo(0, 3);
     ctx.moveTo(-18, 0); ctx.lineTo(18, 0);
     ctx.stroke();
-    ctx.font = '600 11px "Noto Serif TC", serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('北', 0, -24);
+    // Vermilion-inked North spearhead finial (wordless orientation matching HUD compass)
+    ctx.fillStyle = 'rgba(182, 64, 44, 0.85)';
+    ctx.beginPath();
+    ctx.moveTo(0, -29);
+    ctx.lineTo(3.5, -24);
+    ctx.lineTo(0, -19.5);
+    ctx.lineTo(-3.5, -24);
+    ctx.closePath();
+    ctx.fill();
     ctx.restore();
   }
 
@@ -554,54 +560,233 @@ export class GameMap {
     }
     ctx.restore();
 
-    // 7. Discovered Wonder landmarks (delicate vermilion-ink 4-point star + caption)
+    // 7. Discovered Wonder landmarks (delicate vermilion-ink 4-point star + illustrated glyph)
     if (wonders.length) {
       ctx.save();
-      ctx.textAlign = 'center';
-      ctx.font = `600 ${1.72 * u}px "Noto Serif TC", serif`;
       for (const w of wonders) {
         if (!w.discovered) continue;
         const [x, y] = this.toMap(w.def.x, w.def.z, size);
-        const r = 1.35 * u;
-        ctx.fillStyle = 'rgba(176, 62, 42, 0.88)';
-        ctx.strokeStyle = 'rgba(248, 240, 222, 0.88)';
-        ctx.lineWidth = Math.max(1, 0.25 * u);
+        const r = 1.28 * u;
+        ctx.fillStyle = 'rgba(176, 62, 42, 0.9)';
+        ctx.strokeStyle = 'rgba(248, 240, 222, 0.9)';
+        ctx.lineWidth = Math.max(1, 0.24 * u);
         ctx.beginPath();
         ctx.moveTo(x, y - r);
-        ctx.lineTo(x + r * 0.42, y - r * 0.42);
+        ctx.lineTo(x + r * 0.4, y - r * 0.4);
         ctx.lineTo(x + r, y);
-        ctx.lineTo(x + r * 0.42, y + r * 0.42);
+        ctx.lineTo(x + r * 0.4, y + r * 0.4);
         ctx.lineTo(x, y + r);
-        ctx.lineTo(x - r * 0.42, y + r * 0.42);
+        ctx.lineTo(x - r * 0.4, y + r * 0.4);
         ctx.lineTo(x - r, y);
-        ctx.lineTo(x - r * 0.42, y - r * 0.42);
+        ctx.lineTo(x - r * 0.4, y - r * 0.4);
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
 
-        ctx.lineJoin = 'round';
-        ctx.strokeStyle = 'rgba(246, 238, 220, 0.90)';
-        ctx.lineWidth = Math.max(2, 0.65 * u);
-        ctx.strokeText(w.def.name, x, y + 2.85 * u);
-        ctx.fillStyle = 'rgba(138, 40, 24, 0.94)';
-        ctx.fillText(w.def.name, x, y + 2.85 * u);
+        this.drawWonderGlyph(ctx, w.def.id, x, y + 2.45 * u, u);
       }
       ctx.restore();
     }
 
-    // 8. Hand-inked region names ONLY for biomes the player has visited (unvisited stay mysterious)
+    // 8. Subtle hand-inked biome crest watermarks for visited biomes (wordless atlas)
     ctx.save();
-    ctx.textAlign = 'center';
-    ctx.lineJoin = 'round';
-    ctx.font = `700 ${2.45 * u}px "Noto Serif TC", serif`;
     for (const b of BIOMES) {
       if (visitedBiomes && !visitedBiomes.has(b.index)) continue;
       const [x, y] = this.toMap(b.labelX, b.labelZ, size);
-      ctx.strokeStyle = 'rgba(246, 238, 220, 0.88)';
-      ctx.lineWidth = Math.max(2.5, 0.85 * u);
-      ctx.strokeText(b.name, x, y);
-      ctx.fillStyle = 'rgba(42, 31, 18, 0.88)';
-      ctx.fillText(b.name, x, y);
+      this.drawBiomeWatermark(ctx, b.id, x, y, u);
+    }
+    ctx.restore();
+  }
+
+  /** Hand-inked miniature cartographic illustration for each discovered Wonder. */
+  private drawWonderGlyph(ctx: CanvasRenderingContext2D, id: string, x: number, y: number, u: number) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    const s = 1.35 * u;
+
+    // Soft parchment halo behind the miniature icon
+    ctx.fillStyle = 'rgba(246, 238, 220, 0.72)';
+    ctx.beginPath();
+    ctx.arc(0, 0, s * 1.15, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(148, 42, 26, 0.92)';
+    ctx.fillStyle = 'rgba(176, 62, 42, 0.22)';
+    ctx.lineWidth = Math.max(1.1, 0.28 * u);
+
+    if (id === 'sakura') {
+      // 5-petal blossom cluster
+      for (let i = 0; i < 5; i++) {
+        const a = (i * Math.PI * 2) / 5 - Math.PI / 2;
+        ctx.beginPath();
+        ctx.arc(Math.cos(a) * s * 0.42, Math.sin(a) * s * 0.42, s * 0.34, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    } else if (id === 'arch') {
+      // Stone bridge arch spanning water wave
+      ctx.beginPath();
+      ctx.arc(0, s * 0.2, s * 0.72, Math.PI, 0);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, s * 0.25, s * 0.44, Math.PI, 0);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.85, s * 0.45);
+      ctx.quadraticCurveTo(-s * 0.3, s * 0.22, 0, s * 0.45);
+      ctx.quadraticCurveTo(s * 0.3, s * 0.68, s * 0.85, s * 0.45);
+      ctx.stroke();
+    } else if (id === 'bones') {
+      // Leviathan ribcage arcs along spine
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.78, s * 0.32);
+      ctx.quadraticCurveTo(0, s * 0.12, s * 0.78, s * 0.32);
+      ctx.stroke();
+      for (const ox of [-0.48, 0, 0.48]) {
+        ctx.beginPath();
+        ctx.arc(ox * s, s * 0.22, s * 0.45, Math.PI * 1.12, Math.PI * 1.88);
+        ctx.stroke();
+      }
+    } else if (id === 'gate') {
+      // Triangular sunken stone gate + floating diamond
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.65, s * 0.65);
+      ctx.lineTo(0, -s * 0.72);
+      ctx.lineTo(s * 0.65, s * 0.65);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, -s * 0.2);
+      ctx.lineTo(s * 0.2, s * 0.1);
+      ctx.lineTo(0, s * 0.4);
+      ctx.lineTo(-s * 0.2, s * 0.1);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else if (id === 'spirittree') {
+      // Tall ancient tree canopy + flared roots
+      ctx.beginPath();
+      ctx.moveTo(0, -s * 0.1);
+      ctx.lineTo(0, s * 0.65);
+      ctx.moveTo(0, s * 0.4);
+      ctx.lineTo(-s * 0.45, s * 0.7);
+      ctx.moveTo(0, s * 0.4);
+      ctx.lineTo(s * 0.45, s * 0.7);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.ellipse(0, -s * 0.28, s * 0.78, s * 0.42, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    } else if (id === 'ice_spire') {
+      // Faceted glacier spire cluster
+      ctx.beginPath();
+      ctx.moveTo(0, -s * 0.82);
+      ctx.lineTo(s * 0.34, s * 0.65);
+      ctx.lineTo(-s * 0.34, s * 0.65);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.56, s * 0.65);
+      ctx.lineTo(-s * 0.38, -s * 0.25);
+      ctx.moveTo(s * 0.56, s * 0.65);
+      ctx.lineTo(s * 0.38, -s * 0.25);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /** Delicate low-contrast sepia ink crest marking a visited biome region. */
+  private drawBiomeWatermark(ctx: CanvasRenderingContext2D, id: string, x: number, y: number, u: number) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    const s = 2.4 * u;
+
+    // Subtle parchment glow for legibility over terrain contours
+    const g = ctx.createRadialGradient(0, 0, s * 0.15, 0, 0, s * 1.35);
+    g.addColorStop(0, 'rgba(246, 238, 220, 0.55)');
+    g.addColorStop(1, 'rgba(246, 238, 220, 0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, s * 1.35, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(54, 40, 24, 0.52)';
+    ctx.lineWidth = Math.max(1.1, 0.3 * u);
+
+    if (id === 'meadow') {
+      // Rolling hills + tiny blossom
+      ctx.beginPath();
+      ctx.moveTo(-s, s * 0.45);
+      ctx.quadraticCurveTo(-s * 0.35, -s * 0.25, s * 0.2, s * 0.45);
+      ctx.moveTo(-s * 0.25, s * 0.45);
+      ctx.quadraticCurveTo(s * 0.35, -s * 0.12, s, s * 0.45);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(-s * 0.3, -s * 0.38, s * 0.16, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (id === 'karst') {
+      // Twin karst limestone pillars + mist wave
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.72, s * 0.45);
+      ctx.lineTo(-s * 0.42, -s * 0.62);
+      ctx.lineTo(-s * 0.12, s * 0.45);
+      ctx.moveTo(s * 0.05, s * 0.45);
+      ctx.lineTo(s * 0.42, -s * 0.8);
+      ctx.lineTo(s * 0.76, s * 0.45);
+      ctx.stroke();
+    } else if (id === 'canyon') {
+      // Stepped flat-top red mesas
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.9, s * 0.5);
+      ctx.lineTo(-s * 0.65, -s * 0.35);
+      ctx.lineTo(-s * 0.05, -s * 0.35);
+      ctx.lineTo(s * 0.1, s * 0.1);
+      ctx.lineTo(s * 0.32, -s * 0.55);
+      ctx.lineTo(s * 0.78, -s * 0.55);
+      ctx.lineTo(s * 0.92, s * 0.5);
+      ctx.stroke();
+    } else if (id === 'maple') {
+      // Stylized autumn maple leaf over lake line
+      ctx.beginPath();
+      ctx.moveTo(0, -s * 0.72);
+      ctx.lineTo(s * 0.22, -s * 0.15);
+      ctx.lineTo(s * 0.72, -s * 0.22);
+      ctx.lineTo(s * 0.32, s * 0.15);
+      ctx.lineTo(s * 0.45, s * 0.48);
+      ctx.lineTo(0, s * 0.3);
+      ctx.lineTo(-s * 0.45, s * 0.48);
+      ctx.lineTo(-s * 0.32, s * 0.15);
+      ctx.lineTo(-s * 0.72, -s * 0.22);
+      ctx.lineTo(-s * 0.22, -s * 0.15);
+      ctx.closePath();
+      ctx.stroke();
+    } else if (id === 'mistwood') {
+      // Wide canopy + mist bands
+      ctx.beginPath();
+      ctx.arc(0, -s * 0.15, s * 0.58, Math.PI, 0);
+      ctx.moveTo(0, -s * 0.15);
+      ctx.lineTo(0, s * 0.52);
+      ctx.moveTo(-s * 0.82, s * 0.52);
+      ctx.lineTo(s * 0.82, s * 0.52);
+      ctx.moveTo(-s * 0.55, s * 0.22);
+      ctx.lineTo(s * 0.55, s * 0.22);
+      ctx.stroke();
+    } else if (id === 'snow') {
+      // Crisp alpine peak + aurora arc
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.85, s * 0.5);
+      ctx.lineTo(0, -s * 0.55);
+      ctx.lineTo(s * 0.85, s * 0.5);
+      ctx.moveTo(-s * 0.32, -s * 0.12);
+      ctx.lineTo(0, s * 0.04);
+      ctx.lineTo(s * 0.32, -s * 0.12);
+      ctx.moveTo(-s * 0.7, -s * 0.62);
+      ctx.quadraticCurveTo(0, -s * 0.98, s * 0.7, -s * 0.62);
+      ctx.stroke();
     }
     ctx.restore();
   }

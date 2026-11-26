@@ -15,7 +15,7 @@ import { Input } from './input';
 import { GameMap } from './map';
 import { NatureAudio } from './audio';
 import { Particles, AmbientMotes } from './fx';
-import { createWilds, RingCourse, type CourseEvent } from './collectibles';
+import { createWilds, RingCourse, type Updraft, type CourseEvent } from './collectibles';
 import { updateCelTime, updateDayNight, updateBiomeAtmosphere, celUniforms, DAY_PRESETS } from './cel';
 import { BIOMES, BIOME_COUNT, sampleBiomeWeights, sampleDominantBiome } from './biomes';
 import { WONDER_DEFS, MOMENT_DEFS, Wonder } from './landmarks';
@@ -24,38 +24,123 @@ import { WONDER_DEFS, MOMENT_DEFS, Wonder } from './landmarks';
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>('scene');
 const hud = $('hud');
+const hudLeft = $('hud-left');
 const titleScreen = $('title-screen');
+const titleProgress = $('title-progress');
 const mapOverlay = $('map-overlay');
 const mapCanvas = $<HTMLCanvasElement>('map-canvas');
 const btnInteract = $('btn-interact');
-const btnInteractLabel = $('btn-interact-label');
+const iconResonate = $('icon-resonate');
+const iconVista = $('icon-vista');
+const iconReturn = $('icon-return');
+const btnJump = $('btn-jump');
+const iconJump = $('icon-jump');
+const iconGlide = $('icon-glide');
+const iconLeap = $('icon-leap');
+const btnSprint = $('btn-sprint');
+const iconSprint = $('icon-sprint');
+const iconDive = $('icon-dive');
 const btnTime = $('btn-time');
-const iconSun = $('icon-sun');
-const iconMoon = $('icon-moon');
+const timeIcons = {
+  morning: $('icon-time-morning'),
+  sunset: $('icon-time-sunset'),
+  night: $('icon-time-night'),
+  dawn: $('icon-time-dawn'),
+};
 const btnAudio = $('btn-audio');
 const iconAudioOn = $('icon-audio-on');
 const iconAudioOff = $('icon-audio-off');
-const toastEl = $('toast');
+const btnMap = $('btn-map');
 const regionBannerEl = $('region-banner');
-const regionTagEl = $('region-tag');
-const regionNameEl = $('region-name');
-const regionSubEl = $('region-sub');
+const regionCrownEl = $('region-crown');
+const regionEmblemEl = $('region-emblem');
+const towerPill = $('tower-count');
 const towerNum = $('tower-count-num');
 const orbNum = $('orb-count-num');
 const orbTotal = $('orb-count-total');
 const orbPill = $('orb-count');
+const orbRingSegs = document.getElementById('orb-ring-segs') as unknown as SVGGElement;
 const compassStrip = $('compass-strip');
-const hintEl = $('hint');
+const onboardHint = $('onboard-hint');
 const staminaEl = $('stamina');
 const staminaFg = document.getElementById('stamina-fg') as unknown as SVGCircleElement;
 const staminaBg = document.getElementById('stamina-bg') as unknown as SVGCircleElement;
 const speedlines = $('speedlines');
+const exhaustVignette = $('exhaust-vignette');
+const letterboxEl = $('letterbox');
+const momentFrameEl = $('moment-frame');
 const trialEl = $('trial');
-const trialName = $('trial-name');
+const trialDotsEl = $('trial-dots');
 const trialCount = $('trial-count');
 const trialBar = $('trial-bar');
-const floatLayer = $('float-layer');
-const glideHint = $('glide-hint');
+const fxLayer = $('fx-layer');
+const actionCueEl = $('action-cue');
+const cueGlideSvg = $('cue-glide');
+const cueUpdraftSvg = $('cue-updraft');
+
+// ------------------------------------------------------------ Biome Arrival SVG Emblems
+const BIOME_EMBLEMS: string[] = [
+  // 0: Meadow — rolling hills + blooming wildflower
+  `<svg viewBox="0 0 56 56">
+    <path d="M8 40Q20 26 32 40M22 40Q36 28 48 40"/>
+    <path d="M22 31v-9"/>
+    <circle cx="22" cy="18" r="2.2" fill="#ffe7a8" stroke="none"/>
+    <circle cx="22" cy="13.5" r="2.2"/><circle cx="26.2" cy="16.6" r="2.2"/>
+    <circle cx="24.6" cy="21.4" r="2.2"/><circle cx="19.4" cy="21.4" r="2.2"/>
+    <circle cx="17.8" cy="16.6" r="2.2"/>
+  </svg>`,
+  // 1: Karst — twin soaring limestone spires + turquoise wave
+  `<svg viewBox="0 0 56 56">
+    <path d="M11 39 19 15 27 39M25 39 35 11 45 39"/>
+    <path d="M9 43Q18 39 28 43T47 43"/>
+    <path d="M16 25Q28 21 40 25" opacity="0.6"/>
+  </svg>`,
+  // 2: Canyon — stepped terraced mesas + desert sun
+  `<svg viewBox="0 0 56 56">
+    <circle cx="38" cy="16" r="5" opacity="0.85"/>
+    <path d="M8 42 14 26h14l4 8h6l4-10h6"/>
+    <path d="M12 34h16M8 42h40"/>
+  </svg>`,
+  // 3: Maple — autumn maple leaf + calm lake reflection
+  `<svg viewBox="0 0 56 56">
+    <path d="M28 10l4 10 10-2-6 8 4 7-12-4-12 4 4-7-6-8 10 2z"/>
+    <path d="M28 29v10M14 43h28M20 47h16" opacity="0.72"/>
+  </svg>`,
+  // 4: Mistwood — wide-canopy ancient tree + luminous spores
+  `<svg viewBox="0 0 56 56">
+    <path d="M14 28a14 11 0 0 1 28 0z"/>
+    <path d="M28 28v14M28 38l-6 4M28 38l6 4"/>
+    <circle cx="15" cy="17" r="1.5" fill="#7fffe8" stroke="none"/>
+    <circle cx="42" cy="19" r="1.5" fill="#7fffe8" stroke="none"/>
+    <circle cx="20" cy="36" r="1.2" fill="#c9b8ff" stroke="none"/>
+    <circle cx="38" cy="35" r="1.2" fill="#7fffe8" stroke="none"/>
+  </svg>`,
+  // 5: Snow — sharp glacier peak + flowing aurora ribbon
+  `<svg viewBox="0 0 56 56">
+    <path d="M10 43 28 17 46 43Z"/>
+    <path d="M21 27l7 4 7-4"/>
+    <path d="M12 16Q22 7 32 13T46 10" stroke="#98ffd8" opacity="0.9"/>
+  </svg>`,
+];
+
+// Build 5 circular arc segments around the orb icon (each 5 orbs = stamina upgrade)
+const orbSegEls: SVGPathElement[] = [];
+{
+  const cx = 16, cy = 16, r = 13.4;
+  const gap = 0.24;
+  const step = (Math.PI * 2) / 5;
+  for (let i = 0; i < 5; i++) {
+    const a0 = i * step + gap / 2;
+    const a1 = (i + 1) * step - gap / 2;
+    const x0 = cx + Math.cos(a0) * r, y0 = cy + Math.sin(a0) * r;
+    const x1 = cx + Math.cos(a1) * r, y1 = cy + Math.sin(a1) * r;
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('d', `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 0 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`);
+    p.setAttribute('class', 'orb-seg');
+    orbRingSegs.appendChild(p);
+    orbSegEls.push(p);
+  }
+}
 
 // ------------------------------------------------------------ Save & Settings
 const SAVE_KEY = 'triangle-explorer-v2';
@@ -165,11 +250,25 @@ function updateSunShadow(fx: number, fy: number, fz: number) {
   sun.target.updateMatrixWorld();
 }
 
-// Day / Night cycle (1 full day = 6 minutes; smooth manual glide via T / sun-moon button)
+// Day / Night cycle (1 full day = 6 minutes; smooth manual glide via T / celestial button)
 const DAY_DURATION = 360;
 let timeOfDay = 0.39; // bright late-morning start
 let timePresetIdx = 0;
 let timeGlide: { from: number; delta: number; t: number; dur: number } | null = null;
+let lastTimePhase: 'morning' | 'sunset' | 'night' | 'dawn' = 'morning';
+
+function syncTimeIcon(phase: 'morning' | 'sunset' | 'night' | 'dawn') {
+  timeIcons.morning.hidden = phase !== 'morning';
+  timeIcons.sunset.hidden = phase !== 'sunset';
+  timeIcons.night.hidden = phase !== 'night';
+  timeIcons.dawn.hidden = phase !== 'dawn';
+  if (phase !== lastTimePhase) {
+    lastTimePhase = phase;
+    btnTime.classList.remove('spin');
+    void btnTime.offsetWidth;
+    btnTime.classList.add('spin');
+  }
+}
 
 function applyDayNight(tod: number) {
   const dn = updateDayNight(tod);
@@ -178,10 +277,7 @@ function applyDayNight(tod: number) {
   hemi.groundColor.copy(dn.hemiGround);
   hemi.intensity = dn.hemiIntensity;
   bloomPass.strength = dn.bloomStrength;
-  const isNight = dn.phase === 'night';
-  iconSun.toggleAttribute('hidden', isNight);
-  iconMoon.toggleAttribute('hidden', !isNight);
-  btnTime.title = `切換時辰：目前${dn.phaseLabel} (T)`;
+  syncTimeIcon(dn.phase);
 }
 applyDayNight(timeOfDay);
 
@@ -281,23 +377,26 @@ const world: WorldQuery = {
 
 // ------------------------------------------------------------ Input
 const input = new Input($('touch-layer'), $('joystick'), $('joy-knob'));
-input.bindButton($('btn-jump'), () => { audio.unlock(); input.jump = true; });
-input.bindHold($('btn-sprint'), () => audio.unlock());
+input.bindButton(btnJump, () => { audio.unlock(); input.jump = true; });
+input.bindHold(btnSprint, () => audio.unlock());
 input.bindButton(btnInteract, () => { audio.unlock(); input.action = true; });
-input.bindButton($('btn-map'), () => { audio.unlock(); input.map = true; });
+input.bindButton(btnMap, () => { audio.unlock(); input.map = true; });
 input.bindButton($('btn-map-close'), () => closeMap());
+mapOverlay.addEventListener('pointerdown', (e) => {
+  if (e.target === mapOverlay) closeMap();
+});
+hudLeft.addEventListener('pointerdown', (e) => {
+  e.stopPropagation();
+  wakeHud(4500);
+});
+
 function cycleTimeOfDay() {
   timePresetIdx = (timePresetIdx + 1) % DAY_PRESETS.length;
   const preset = DAY_PRESETS[timePresetIdx];
   const delta = ((preset.t - timeOfDay) % 1 + 1) % 1;
   timeGlide = { from: timeOfDay, delta: delta < 0.02 ? delta + 1 : delta, t: 0, dur: 1.5 };
-  const moodSub: Record<string, string> = {
-    morning: '清風徐來 · 朗朗晴空',
-    sunset: '落日熔金 · 霞染群峰',
-    night: '星河垂野 · 螢火微光',
-    dawn: '微曦破曉 · 山嵐輕浮',
-  };
-  toast(`時辰流轉 · ${preset.label}`, moodSub[preset.phase] ?? '', 2400);
+  syncTimeIcon(preset.phase);
+  audio.playTimeShift(preset.phase);
 }
 input.bindButton(btnTime, () => {
   audio.unlock();
@@ -310,11 +409,9 @@ input.bindButton(btnAudio, () => {
 });
 input.onFirstMove = () => {
   audio.unlock();
-  hintEl.classList.add('gone');
+  dismissOnboardHint();
 };
 document.body.classList.toggle('touch', isTouch);
-const JUMP_KEY = isTouch ? '跳躍鍵' : '空白鍵';
-const SPRINT_KEY = isTouch ? '衝刺鍵' : 'Shift';
 
 // ------------------------------------------------------------ State
 type State = 'title' | 'play' | 'cinematic' | 'vista' | 'map';
@@ -330,8 +427,24 @@ let fovKick = 0;
 let shake = 0;
 let lookIdle = 0;
 const camTarget = new THREE.Vector3();
+const camLook = new THREE.Vector3();
 let nearTower: Tower | null = null;
-let cine: { tower: Tower; t: number } | null = null;
+let lastNearShrineIdx = -1;
+let cine: {
+  tower: Tower;
+  updraft: Updraft | undefined;
+  t: number;
+  upgradePlayed: boolean;
+  updraftPlayed: boolean;
+} | null = null;
+let introSwoop: {
+  fromPos: THREE.Vector3;
+  fromLook: THREE.Vector3;
+  t: number;
+  dur: number;
+} | null = null;
+let vistaBreath = 0; // brief horizon swell when grabbing a mountain-peak orb
+let momentFocus = 0; // 0..1 gentle camera focus while dwelling in a Temporal Moment
 let mapAnimating = false;
 let elapsed = 0;
 let allDoneShown = false;
@@ -346,23 +459,49 @@ let pendingBiome = 0;
 let pendingBiomeT = 0;
 const regionLastShown = new Map<number, number>();
 let regionBannerTimer = 0;
+let hudQuietTimer = 0;
+let letterboxTimer = 0;
+let onboardShowTimer = 0;
+let staminaForceT = 0;
+let staminaUpgradeT = 0;
+let glideCuePlayed = false;
+
+// ------------------------------------------------------------ Wordless UI & FX helpers
+function wakeHud(ms = 4800) {
+  hudLeft.classList.remove('quiet');
+  clearTimeout(hudQuietTimer);
+  hudQuietTimer = window.setTimeout(() => {
+    if (state === 'play') hudLeft.classList.add('quiet');
+  }, ms);
+}
+
+function dismissOnboardHint() {
+  clearTimeout(onboardShowTimer);
+  onboardHint.classList.remove('show');
+  onboardHint.classList.add('gone');
+}
+
+function triggerLetterbox(ms = 2400) {
+  clearTimeout(letterboxTimer);
+  letterboxEl.classList.add('show');
+  letterboxTimer = window.setTimeout(() => {
+    letterboxEl.classList.remove('show');
+  }, ms);
+}
 
 function showRegionBanner(biomeIdx: number, isFirst: boolean) {
   const b = BIOMES[biomeIdx];
   if (!b) return;
   clearTimeout(regionBannerTimer);
-  regionTagEl.hidden = !isFirst;
-  regionNameEl.textContent = b.name;
-  regionSubEl.textContent = b.subtitle;
-  regionBannerEl.setAttribute('aria-hidden', 'false');
+  regionCrownEl.hidden = !isFirst;
+  regionEmblemEl.innerHTML = BIOME_EMBLEMS[biomeIdx] ?? BIOME_EMBLEMS[0];
   regionBannerEl.classList.remove('show');
   void regionBannerEl.offsetWidth;
   regionBannerEl.classList.add('show');
   audio.playRegionEnter(biomeIdx, isFirst);
   regionBannerTimer = window.setTimeout(() => {
     regionBannerEl.classList.remove('show');
-    regionBannerEl.setAttribute('aria-hidden', 'true');
-  }, isFirst ? 4400 : 3400);
+  }, isFirst ? 3600 : 2700);
 }
 
 function updateRegionTracking(dt: number) {
@@ -396,6 +535,127 @@ function updateRegionTracking(dt: number) {
   }
 }
 
+const projV = new THREE.Vector3();
+function toScreen(p: THREE.Vector3): { x: number; y: number; ok: boolean } {
+  projV.copy(p).project(camera);
+  return {
+    x: (projV.x * 0.5 + 0.5) * window.innerWidth,
+    y: (-projV.y * 0.5 + 0.5) * window.innerHeight,
+    ok: projV.z < 1 && Math.abs(projV.x) < 1.2 && Math.abs(projV.y) < 1.2,
+  };
+}
+
+function spawnPickupRipple(p: THREE.Vector3, color: string, scale = 3.2) {
+  const s = toScreen(p);
+  if (!s.ok) return;
+  const el = document.createElement('div');
+  el.className = 'pickup-ripple';
+  el.style.left = `${s.x}px`;
+  el.style.top = `${s.y}px`;
+  el.style.color = color;
+  el.style.setProperty('--s', String(scale));
+  fxLayer.appendChild(el);
+  window.setTimeout(() => el.remove(), 700);
+}
+
+/** Smoothly flies glowing screen-space light-motes along a curved arc to a HUD element. */
+function spawnFlyMotes(
+  fromX: number, fromY: number,
+  targetEl: HTMLElement,
+  color: string,
+  opts: { count?: number; star?: boolean; dur?: number; onArrive?: () => void } = {},
+) {
+  const rect = targetEl.getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) {
+    opts.onArrive?.();
+    return;
+  }
+  const tx = rect.left + rect.width * 0.5;
+  const ty = rect.top + rect.height * 0.5;
+  const count = opts.count ?? 1;
+  const dur = opts.dur ?? 680;
+  let arrived = false;
+
+  for (let i = 0; i < count; i++) {
+    const el = document.createElement('div');
+    el.className = opts.star ? 'fly-mote star' : 'fly-mote';
+    el.style.background = color;
+    el.style.boxShadow = `0 0 12px ${color}, 0 0 4px #ffffff`;
+    fxLayer.appendChild(el);
+
+    const delay = i * 65;
+    const spread = (i - (count - 1) * 0.5) * 44;
+    const mx = (fromX + tx) * 0.5 + spread + (Math.random() - 0.5) * 32;
+    const my = Math.min(fromY, ty) - 48 - Math.random() * 44;
+    const start = performance.now() + delay;
+
+    const tick = (now: number) => {
+      const raw = (now - start) / dur;
+      if (raw < 0) {
+        el.style.opacity = '0';
+        requestAnimationFrame(tick);
+        return;
+      }
+      if (raw >= 1) {
+        el.remove();
+        if (!arrived) {
+          arrived = true;
+          opts.onArrive?.();
+        }
+        return;
+      }
+      const t = raw * raw * (3 - 2 * raw);
+      const u = 1 - t;
+      const x = u * u * fromX + 2 * u * t * mx + t * t * tx;
+      const y = u * u * fromY + 2 * u * t * my + t * t * ty;
+      const sc = 0.7 + Math.sin(t * Math.PI) * 0.65;
+      el.style.opacity = String(Math.min(1, (1 - raw) * 3.5));
+      el.style.transform = `translate(${x}px, ${y}px) scale(${sc})`;
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+}
+
+function pingEl(el: HTMLElement, cls: string) {
+  el.classList.remove(cls);
+  void el.offsetWidth;
+  el.classList.add(cls);
+}
+
+function updateOrbRing(justUpgraded = false) {
+  const rem = orbs.count % 5;
+  const lit = justUpgraded ? 5 : rem;
+  for (let i = 0; i < 5; i++) {
+    orbSegEls[i].classList.toggle('lit', i < lit);
+  }
+}
+
+function updateCounter() {
+  const n = towers.filter((t) => t.activated).length;
+  towerNum.textContent = String(n);
+  towerPill.classList.toggle('complete', n >= towers.length);
+  orbNum.textContent = String(orbs.count);
+  orbTotal.textContent = `/ ${orbs.total}`;
+  updateOrbRing();
+}
+
+function triggerStaminaUpgradeVisual(fromOrbPill = false) {
+  staminaForceT = 2.9;
+  staminaUpgradeT = 1.3;
+  staminaEl.classList.remove('upgraded');
+  void staminaEl.offsetWidth;
+  staminaEl.classList.add('upgraded');
+  if (fromOrbPill) {
+    const r = orbPill.getBoundingClientRect();
+    spawnFlyMotes(r.left + r.width * 0.5, r.top + r.height * 0.5, staminaEl, '#8dff9a', {
+      count: 3,
+      dur: 560,
+    });
+  }
+}
+
+// ------------------------------------------------------------ Progress & Save
 function staminaMaxFor() {
   const act = towers.filter((t) => t.activated).length;
   return 100 + act * 15 + Math.floor(orbs.count / 5) * 10;
@@ -405,7 +665,7 @@ function resetPlayer() {
   player.staminaMax = staminaMaxFor();
   player.place(START_POS.x, terrain.height(START_POS.x, START_POS.z), START_POS.z);
   player.facing = Math.PI;
-  camYaw = 0; // face north across the valley
+  camYaw = 0; // face north across the valley toward breadcrumb orb trail
 }
 
 function applySave() {
@@ -474,79 +734,17 @@ function save() {
   localStorage.setItem(SAVE_KEY, JSON.stringify(data));
 }
 
-// ------------------------------------------------------------ UI helpers
-interface ToastMsg { title: string; sub: string; ms: number; cls: string; }
-const toastQueue: ToastMsg[] = [];
-let toastBusy = false;
-function toast(title: string, sub = '', ms = 3400, cls = '') {
-  // Collapse duplicates already waiting
-  if (toastQueue.some((t) => t.title === title)) return;
-  toastQueue.push({ title, sub, ms, cls });
-  if (!toastBusy) nextToast();
-}
-function nextToast() {
-  const m = toastQueue.shift();
-  if (!m) { toastBusy = false; return; }
-  toastBusy = true;
-  toastEl.className = `toast ${m.cls}`;
-  toastEl.innerHTML = `<strong>${m.title}</strong>${m.sub ? `<span>${m.sub}</span>` : ''}`;
-  void toastEl.offsetWidth;
-  toastEl.classList.add('show');
-  const dur = toastQueue.length ? Math.min(m.ms, 2200) : m.ms;
-  window.setTimeout(() => {
-    toastEl.classList.remove('show');
-    window.setTimeout(nextToast, 380);
-  }, dur);
-}
-function tip(id: string, title: string, sub: string, ms = 4600) {
-  if (tipsShown.has(id)) return;
-  tipsShown.add(id);
-  toast(title, sub, ms, 'tip');
-  save();
-}
-
-const projV = new THREE.Vector3();
-function toScreen(p: THREE.Vector3): { x: number; y: number; ok: boolean } {
-  projV.copy(p).project(camera);
-  return {
-    x: (projV.x * 0.5 + 0.5) * window.innerWidth,
-    y: (-projV.y * 0.5 + 0.5) * window.innerHeight,
-    ok: projV.z < 1 && Math.abs(projV.x) < 1.2 && Math.abs(projV.y) < 1.2,
-  };
-}
-function floatText(p: THREE.Vector3, text: string, cls = '') {
-  const s = toScreen(p);
-  if (!s.ok) return;
-  const el = document.createElement('div');
-  el.className = `float-text ${cls}`;
-  el.textContent = text;
-  el.style.left = `${s.x}px`;
-  el.style.top = `${s.y}px`;
-  floatLayer.appendChild(el);
-  setTimeout(() => el.remove(), 1300);
-}
-
-function updateCounter() {
-  const n = towers.filter((t) => t.activated).length;
-  towerNum.textContent = String(n);
-  orbNum.textContent = String(orbs.count);
-  orbTotal.textContent = `/ ${orbs.total}`;
-}
-function bumpOrbPill() {
-  orbPill.classList.remove('bump');
-  void orbPill.offsetWidth;
-  orbPill.classList.add('bump');
-}
-
-// Compass: cardinal labels + markers for nearby discovered shrines.
+// ------------------------------------------------------------ Compass (Wordless Geometric)
 const compassItems: { el: HTMLElement; bearing: () => number; alpha: () => number }[] = [];
-(['北', '東', '南', '西'] as const).forEach((label, i) => {
+const towerCompassEls: HTMLElement[] = [];
+
+// Cardinal markers: coral North triangle, tall E/W ticks, diamond South
+for (let i = 0; i < 4; i++) {
   const el = document.createElement('span');
-  el.className = 'c-label' + (i === 0 ? ' north' : '');
-  el.textContent = label;
+  el.className = i === 0 ? 'c-north' : i === 2 ? 'c-south' : 'c-cardinal';
   compassStrip.appendChild(el);
   compassItems.push({ el, bearing: () => (i * Math.PI) / 2, alpha: () => 1 });
-});
+}
 for (let i = 0; i < 8; i++) {
   if (i % 2 === 0) continue;
   const el = document.createElement('span');
@@ -558,6 +756,7 @@ towers.forEach((t) => {
   const el = document.createElement('span');
   el.className = 'c-tower';
   compassStrip.appendChild(el);
+  towerCompassEls.push(el);
   compassItems.push({
     el,
     bearing: () => Math.atan2(t.def.x - player.pos.x, -(t.def.z - player.pos.z)),
@@ -604,11 +803,17 @@ function updateCompass() {
 const headPos = new THREE.Vector3();
 let staminaShowT = 0;
 function updateStamina(dt: number) {
+  if (staminaForceT > 0) staminaForceT = Math.max(0, staminaForceT - dt);
+  if (staminaUpgradeT > 0) {
+    staminaUpgradeT = Math.max(0, staminaUpgradeT - dt);
+    if (staminaUpgradeT === 0) staminaEl.classList.remove('upgraded');
+  }
   const full = player.stamina >= player.staminaMax - 0.01 && !player.exhausted;
   const busy = player.climbing || player.gliding || player.sprinting;
-  staminaShowT = full && !busy ? staminaShowT - dt : 1.0;
-  const visible = state === 'play' && staminaShowT > 0;
+  staminaShowT = full && !busy ? Math.max(0, staminaShowT - dt) : 1.0;
+  const visible = (state === 'play' || state === 'cinematic') && (staminaShowT > 0 || staminaForceT > 0);
   staminaEl.classList.toggle('show', visible);
+  exhaustVignette.classList.toggle('show', state === 'play' && player.exhausted);
   if (!visible) return;
   headPos.set(player.pos.x, player.pos.y + 1.6, player.pos.z);
   const s = toScreen(headPos);
@@ -630,24 +835,32 @@ function updateStamina(dt: number) {
 
 // ------------------------------------------------------------ Map overlay
 let mapHideTimer = 0;
-function progressText() {
+function updateMapStats() {
   const n = towers.filter((t) => t.activated).length;
   const w = wonders.filter((x) => x.discovered).length;
   const m = capturedMoments.size;
   const c = courses.filter((c) => c.done).length;
-  return `古碑 ${n}/${towers.length} · 靈光 ${orbs.count}/${orbs.total} · 奇景 ${w}/${wonders.length} · 時景 ${m}/${MOMENT_DEFS.length} · 試煉 ${c}/${courses.length}`;
+  $('ms-tower').textContent = `${n}/${towers.length}`;
+  $('ms-orb').textContent = `${orbs.count}/${orbs.total}`;
+  $('ms-wonder').textContent = `${w}/${wonders.length}`;
+  $('ms-moment').textContent = `${m}/${MOMENT_DEFS.length}`;
+  $('ms-trial').textContent = `${c}/${courses.length}`;
 }
+
 function openMap(animate = false) {
   clearTimeout(mapHideTimer);
   state = 'map';
   mapAnimating = animate;
+  audio.updateMomentDwell(0);
+  momentFrameEl.style.setProperty('--dwell', '0');
   audio.playMap(true);
-  $('map-progress').textContent = progressText();
+  updateMapStats();
   mapOverlay.hidden = false;
   gameMap.draw(mapCanvas, towers, elapsed, visitedBiomes, wonders);
   void mapOverlay.offsetWidth;
   mapOverlay.classList.add('open');
 }
+
 function closeMap() {
   if (state !== 'map') return;
   if (mapAnimating) {
@@ -661,9 +874,14 @@ function closeMap() {
   state = 'play';
   camDistTarget = 10;
   camLiftTarget = 0;
+  wakeHud(4200);
   if (towers.every((t) => t.activated) && !allDoneShown) {
     allDoneShown = true;
-    toast('群山萬水盡入畫卷', '所有古碑皆已共鳴。伴著山風繼續漫遊吧。', 6000);
+    audio.playAllDone();
+    pingEl(towerPill, 'bump');
+    const p = new THREE.Vector3(player.pos.x, player.pos.y + 1.8, player.pos.z);
+    sparkles.burst(p, 90, '#ffe27a', 12, 0.75, 2.2, 0.5);
+    sparkles.burst(p, 55, '#7ff0ff', 10, 0.65, 2.0, 0.2);
   }
 }
 
@@ -679,6 +897,7 @@ function lineOfSight(from: THREE.Vector3, to: THREE.Vector3): boolean {
   }
   return true;
 }
+
 let discoverTimer = 0;
 function checkDiscovery(dt: number) {
   discoverTimer -= dt;
@@ -694,7 +913,11 @@ function checkDiscovery(dt: number) {
     if (!lineOfSight(camera.position, p)) continue;
     t.discovered = true;
     audio.playDiscover();
-    toast('林間浮現微光', `發現「${t.def.name}」 · 已記於方位羅盤`);
+    sparkles.burst(p, 32, '#ffc966', 6, 0.55, 1.2, 0.5);
+    spawnPickupRipple(p, '#ffc966', 4.0);
+    const marker = towerCompassEls[t.index];
+    if (marker) pingEl(marker, 'ping');
+    wakeHud(4200);
     save();
   }
   // Six regional Wonders: simply seeing the landmark with an unobstructed view discovers it
@@ -707,14 +930,32 @@ function checkDiscovery(dt: number) {
     if (!lineOfSight(camera.position, w.sightPos)) continue;
     w.discovered = true;
     audio.playWonderDiscover();
-    toast(`發現奇景 · ${w.def.name}`, `${w.def.desc} · 已記於大地圖`, 4600, 'gold');
+    triggerLetterbox(2500);
+    sparkles.burst(w.sightPos, 65, '#ffe27a', 11, 0.8, 1.8, 0.4);
+    spawnPickupRipple(w.sightPos, '#ff7d63', 5.2);
+    const sc = toScreen(w.sightPos);
+    if (sc.ok) {
+      spawnFlyMotes(sc.x, sc.y, btnMap, '#ef6a52', {
+        count: 1,
+        star: true,
+        dur: 860,
+        onArrive: () => pingEl(btnMap, 'ping-red'),
+      });
+    } else {
+      pingEl(btnMap, 'ping-red');
+    }
     save();
   }
 }
 
-/** Five Temporal Vistas (時景): pause calmly in the right place & time of day to collect. */
+/** Five Temporal Vistas: pause calmly in the right place & time of day to capture. */
 function checkMoments(dt: number) {
-  if (capturedMoments.size >= MOMENT_DEFS.length) return;
+  if (capturedMoments.size >= MOMENT_DEFS.length) {
+    momentFocus = Math.max(0, momentFocus - dt * 2);
+    momentFrameEl.style.setProperty('--dwell', '0');
+    audio.updateMomentDwell(0);
+    return;
+  }
   const { index: biomeIndex, weight: biomeWeight } = sampleDominantBiome(player.pos.x, player.pos.z);
   camera.getWorldDirection(lookDirV);
   const calm = state === 'vista' || player.speedXZ < 6.5;
@@ -729,6 +970,7 @@ function checkMoments(dt: number) {
     sunsetFactor: celUniforms.uSunsetFactor.value,
     lookDir: lookDirV,
   };
+  let maxProgress = 0;
   for (const m of MOMENT_DEFS) {
     if (capturedMoments.has(m.id)) continue;
     const prev = momentDwell.get(m.id) ?? 0;
@@ -737,16 +979,37 @@ function checkMoments(dt: number) {
       if (next >= 2.2) {
         capturedMoments.add(m.id);
         momentDwell.delete(m.id);
+        audio.updateMomentDwell(0);
         audio.playMomentCapture();
-        toast(`收錄時景 · ${m.name}`, m.desc, 5000, 'gold');
+        momentFrameEl.style.setProperty('--dwell', '0');
+        momentFrameEl.classList.remove('flash');
+        void momentFrameEl.offsetWidth;
+        momentFrameEl.classList.add('flash');
+        const p = new THREE.Vector3(player.pos.x, player.pos.y + 2.0, player.pos.z);
+        sparkles.burst(p, 55, '#ffe8a3', 8, 0.65, 1.8, -0.4);
+        spawnFlyMotes(window.innerWidth * 0.5, window.innerHeight * 0.44, btnMap, '#ffe27a', {
+          count: 3,
+          star: true,
+          dur: 820,
+          onArrive: () => pingEl(btnMap, 'ping-gold'),
+        });
         save();
       } else {
         momentDwell.set(m.id, next);
+        maxProgress = Math.max(maxProgress, next / 2.2);
       }
     } else if (prev > 0) {
-      momentDwell.set(m.id, Math.max(0, prev - dt * 0.6));
+      const decayed = Math.max(0, prev - dt * 0.7);
+      if (decayed <= 0) momentDwell.delete(m.id);
+      else {
+        momentDwell.set(m.id, decayed);
+        maxProgress = Math.max(maxProgress, decayed / 2.2);
+      }
     }
   }
+  momentFocus += (maxProgress - momentFocus) * Math.min(1, dt * 4);
+  momentFrameEl.style.setProperty('--dwell', maxProgress.toFixed(3));
+  audio.updateMomentDwell(maxProgress);
 }
 
 // ------------------------------------------------------------ Resonance & Aerial Vista
@@ -755,6 +1018,12 @@ function faceShrine(t: Tower) {
   if (Math.hypot(dx, dz) > 0.2) player.facing = Math.atan2(dx, dz);
   player.vel.set(0, 0, 0);
   player.syncModel(0, world.ground(player.pos.x, player.pos.z, player.pos.y));
+}
+
+function setInteractIcon(mode: 'resonate' | 'vista' | 'return') {
+  iconResonate.hidden = mode !== 'resonate';
+  iconVista.hidden = mode !== 'vista';
+  iconReturn.hidden = mode !== 'return';
 }
 
 function activate(t: Tower) {
@@ -770,11 +1039,12 @@ function activate(t: Tower) {
   player.stamina = player.staminaMax;
   player.exhausted = false;
   updateCounter();
+  wakeHud(6000);
+  pingEl(towerPill, 'bump');
   save();
   btnInteract.hidden = true;
-  sparkles.burst(new THREE.Vector3(t.def.x, t.base + 3.6, t.def.z), 80, '#7ff0ff', 12, 0.8, 1.8, 2);
-  toast(`${t.def.name} 已共鳴`, '周遭迷霧已散去 · 體力上限提升 · 古碑旁升起上升氣流', 4200);
-  cine = { tower: t, t: 0 };
+  sparkles.burst(new THREE.Vector3(t.def.x, t.base + 3.6, t.def.z), 85, '#7ff0ff', 12, 0.8, 1.9, 2);
+  cine = { tower: t, updraft: u, t: 0, upgradePlayed: false, updraftPlayed: false };
   state = 'cinematic';
 }
 
@@ -786,7 +1056,7 @@ function startVista(t: Tower) {
   camLiftTarget = 28;
   camDistTarget = 40;
   camPitch = Math.max(0.28, camPitch);
-  btnInteractLabel.textContent = '返回';
+  setInteractIcon('return');
   btnInteract.classList.add('revisit');
   btnInteract.hidden = false;
 }
@@ -797,14 +1067,53 @@ function exitVista() {
   camDistTarget = 10;
 }
 
+/**
+ * 3-phase wordless resonance choreography:
+ * 1) Stamina wheel visibly expands right beside the player with emerald sparkles.
+ * 2) Camera lifts & orbits while softly framing the newly erupting updraft column.
+ * 3) Sweeps back over the valley and opens the map to clear the fog.
+ */
 function updateCinematic(dt: number) {
   if (!cine) return;
   cine.t += dt;
-  camLiftTarget = 26;
-  camDistTarget = 42;
-  camPitch += (0.38 - camPitch) * Math.min(1, dt * 1.5);
+  camLiftTarget = 24;
+  camDistTarget = 40;
+  camPitch += (0.36 - camPitch) * Math.min(1, dt * 1.5);
   camYaw += dt * 0.34;
-  if (cine.t > 3.8) {
+
+  // Phase 1: Stamina upgrade visual beside player
+  if (!cine.upgradePlayed && cine.t >= 0.55) {
+    cine.upgradePlayed = true;
+    audio.playUpgrade();
+    triggerStaminaUpgradeVisual(false);
+    sparkles.burst(new THREE.Vector3(player.pos.x, player.pos.y + 1.4, player.pos.z), 46, '#8dff9a', 7.5, 0.55, 1.4, 0.5);
+  }
+
+  // Phase 2: Newly awakened updraft erupts with audible wind rush & sparkle plume
+  if (!cine.updraftPlayed && cine.updraft && cine.t >= 1.5) {
+    cine.updraftPlayed = true;
+    audio.playUpdraft();
+    const u = cine.updraft;
+    for (let k = 0; k < 48; k++) {
+      const a = Math.random() * Math.PI * 2;
+      const rr = Math.random() * u.r * 0.9;
+      sparkles.spawn(
+        u.x + Math.cos(a) * rr,
+        u.base + Math.random() * 14,
+        u.z + Math.sin(a) * rr,
+        -Math.sin(a) * 2.5,
+        12 + Math.random() * 10,
+        Math.cos(a) * 2.5,
+        '#c6fbff',
+        0.55 + Math.random() * 0.4,
+        2.1,
+        0,
+        0.15,
+      );
+    }
+  }
+
+  if (cine.t > 4.4) {
     cine = null;
     openMap(true);
   }
@@ -828,19 +1137,25 @@ player.events = {
   },
   glideOpen: () => {
     audio.playGlideOpen();
-    tipsShown.add('glide');
-    glideHint.classList.remove('show');
+    if (!tipsShown.has('glide')) {
+      tipsShown.add('glide');
+      save();
+    }
+    actionCueEl.classList.remove('show');
   },
   glideClose: () => audio.playGlideClose(),
   climbStart: () => {
     audio.playGrab();
-    tip('climb', '攀上岩壁', `推動方向攀爬 · ${JUMP_KEY}向上躍 · 向後推＋${JUMP_KEY}跳離 · 留意體力`);
   },
   climbLeap: () => audio.playLeap(),
   mantle: () => { audio.playGrab(); dust.dust(feet(), 6, 1.6); },
   exhausted: () => {
     audio.playExhausted();
-    tip('stamina', '體力耗盡', '站穩腳步休息，體力全滿後才能再次使用');
+  },
+  recovered: () => {
+    audio.playRecovered();
+    staminaForceT = 0.85;
+    sparkles.burst(new THREE.Vector3(player.pos.x, player.pos.y + 1.4, player.pos.z), 18, '#8dff9a', 4.5, 0.4, 0.8, 0.2);
   },
 };
 
@@ -855,72 +1170,175 @@ function onOrbs(got: number[]) {
     audio.playOrb(orbCombo);
     sparkles.burst(p, 26, '#ffd760', 6, 0.55, 1.0, 2);
     sparkles.burst(p, 10, '#ffffff', 3, 0.4, 0.7, 0);
-    floatText(p, orbCombo > 0 ? `+1 ×${orbCombo + 1}` : '+1', 'orb');
-    bumpOrbPill();
-    updateCounter();
+    spawnPickupRipple(p, '#ffe27a', 2.8 + Math.min(2.2, orbCombo * 0.45));
+
+    wakeHud(5000);
     const n = orbs.count;
-    if (n === 1) tip('orb', '拾得靈光', '每收集 5 顆靈光，體力上限就會提升');
-    if (n % 5 === 0) {
+    const upgraded = n % 5 === 0;
+    const sc = toScreen(p);
+    if (sc.ok) {
+      spawnFlyMotes(sc.x, sc.y, orbPill, '#ffe27a', {
+        count: Math.min(4, 1 + Math.floor(orbCombo / 2)),
+        dur: 540,
+        onArrive: () => pingEl(orbPill, upgraded ? 'upgraded' : 'bump'),
+      });
+    } else {
+      pingEl(orbPill, upgraded ? 'upgraded' : 'bump');
+    }
+
+    updateCounter();
+    if (upgraded) {
+      updateOrbRing(true);
       player.staminaMax = staminaMaxFor();
       player.stamina = player.staminaMax;
       player.exhausted = false;
-      setTimeout(() => audio.playUpgrade(), 250);
-      sparkles.burst(p, 50, '#8dff9a', 9, 0.6, 1.4, 1);
-      toast('體力上限提升', `靈光 ${n} 顆 · 體力 ${player.staminaMax}`, 3200, 'gold');
-    } else if (d.kind === 'sky') {
-      toast('乘風摘星', '拾得高空的靈光', 2400);
+      window.setTimeout(() => {
+        audio.playUpgrade();
+        triggerStaminaUpgradeVisual(true);
+        sparkles.burst(new THREE.Vector3(player.pos.x, player.pos.y + 1.3, player.pos.z), 54, '#8dff9a', 9, 0.6, 1.4, 1);
+      }, 260);
+      window.setTimeout(() => updateOrbRing(false), 1200);
     } else if (d.kind === 'peak') {
-      toast('登頂', '山巔的靈光 · 試著從這裡滑翔而下', 2400);
+      // Summit orb: soft vista camera breath + downhill breeze ribbons inviting a glide
+      vistaBreath = 1.0;
+      audio.playPeakVista();
+      const fx = Math.sin(player.facing), fz = Math.cos(player.facing);
+      for (let k = 0; k < 22; k++) {
+        sparkles.spawn(
+          p.x + (Math.random() - 0.5) * 4,
+          p.y + Math.random() * 2,
+          p.z + (Math.random() - 0.5) * 4,
+          fx * (6 + Math.random() * 6),
+          -0.6 + Math.random() * 1.4,
+          fz * (6 + Math.random() * 6),
+          '#e8fbff',
+          0.35 + Math.random() * 0.3,
+          1.4,
+          0,
+          0.2,
+        );
+      }
     }
     checkEverything();
   }
   if (got.length) save();
 }
 
+// ------------------------------------------------------------ Wind Trials
 let activeCourse: RingCourse | null = null;
+let trialDotCourseId = -1;
+let trialTickAcc = 0;
+
+/** Shoots a luminous wind stream from the ring just passed toward the next ring. */
+function spawnRingGuideTrail(from: THREE.Vector3, to: THREE.Vector3) {
+  const dir = to.clone().sub(from);
+  const len = dir.length();
+  if (len < 0.5) return;
+  dir.divideScalar(len);
+  for (let k = 0; k < 18; k++) {
+    const f = k / 18;
+    const speed = 10 + f * 12;
+    sparkles.spawn(
+      from.x + dir.x * (f * 3) + (Math.random() - 0.5) * 0.9,
+      from.y + dir.y * (f * 3) + (Math.random() - 0.5) * 0.9,
+      from.z + dir.z * (f * 3) + (Math.random() - 0.5) * 0.9,
+      dir.x * speed,
+      dir.y * speed,
+      dir.z * speed,
+      k % 3 === 0 ? '#ffe27a' : '#bff8ff',
+      0.42 + Math.random() * 0.28,
+      0.85 + f * 0.35,
+      0,
+      0.4,
+    );
+  }
+}
+
 function onCourse(c: RingCourse, ev: CourseEvent) {
   if (!ev) return;
   if (ev.type === 'start' || ev.type === 'pass') {
     activeCourse = c;
+    trialTickAcc = 0;
     audio.playRing(ev.index - 1);
-    sparkles.burst(c.rings[ev.index - 1].p, 24, '#bff8ff', 7, 0.6, 0.9, 0);
-    if (ev.type === 'start') tip('trial', '風之試煉', '在時限內依序穿過所有光環');
+    const passed = c.rings[ev.index - 1];
+    sparkles.burst(passed.p, 26, '#bff8ff', 7, 0.6, 0.9, 0);
+    const nextRing = c.rings[ev.index];
+    if (nextRing) spawnRingGuideTrail(passed.p, nextRing.p);
   } else if (ev.type === 'fail') {
     if (activeCourse === c) activeCourse = null;
     audio.playCourseFail();
-    toast('試煉中斷', '光環已重置 · 回到山頂再試一次', 2400);
+    sparkles.burst(c.start, 28, '#ffd36a', 5, 0.6, 1.4, -0.5);
   } else if (ev.type === 'complete') {
     activeCourse = null;
     audio.playRing(ev.index - 1);
-    setTimeout(() => audio.playCourseDone(), 180);
-    sparkles.burst(c.end, 90, '#ffe27a', 14, 0.8, 1.8, 1);
+    window.setTimeout(() => audio.playCourseDone(), 180);
+    sparkles.burst(c.end, 95, '#ffe27a', 14, 0.8, 1.8, 1);
+    // Vertical golden beacon shimmer highlighting the revealed reward orb
+    for (let k = 0; k < 24; k++) {
+      sparkles.spawn(
+        c.end.x + (Math.random() - 0.5) * 1.4,
+        c.end.y + k * 0.5,
+        c.end.z + (Math.random() - 0.5) * 1.4,
+        0, 5 + Math.random() * 4, 0,
+        '#fff0a6', 0.55, 1.6, 0, 0.2,
+      );
+    }
     orbs.reveal(c.rewardOrb);
-    toast(`${c.name} · 完成`, '風之試煉達成 · 獲得靈光', 3400, 'gold');
+    wakeHud(5000);
     save();
   }
 }
 
-function updateTrialHud() {
+function updateTrialHud(dt: number) {
   const c = activeCourse;
-  trialEl.classList.toggle('show', !!c && state === 'play');
+  const show = !!c && state === 'play';
+  trialEl.classList.toggle('show', show);
   if (!c) return;
-  trialName.textContent = c.name;
+  if (trialDotCourseId !== c.id || trialDotsEl.childElementCount !== c.rings.length) {
+    trialDotCourseId = c.id;
+    trialDotsEl.innerHTML = '';
+    for (let i = 0; i < c.rings.length; i++) {
+      const dot = document.createElement('span');
+      dot.className = 't-dot';
+      trialDotsEl.appendChild(dot);
+    }
+  }
+  const dots = trialDotsEl.children;
+  for (let i = 0; i < dots.length; i++) {
+    dots[i].classList.toggle('done', i < c.next);
+    dots[i].classList.toggle('next', i === c.next);
+  }
   trialCount.textContent = `${c.next} / ${c.rings.length}`;
   trialBar.style.transform = `scaleX(${Math.max(0, c.timer / RingCourse.WINDOW)})`;
+  const urgent = c.timer < 2.2 && c.timer > 0;
+  trialEl.classList.toggle('urgent', urgent);
+  if (show && urgent) {
+    trialTickAcc += dt;
+    const interval = c.timer < 1.1 ? 0.34 : 0.52;
+    if (trialTickAcc >= interval) {
+      trialTickAcc = 0;
+      audio.playTrialTick(c.timer < 1.1);
+    }
+  } else {
+    trialTickAcc = 0;
+  }
 }
 
 function checkEverything() {
   if (everythingShown) return;
   if (orbs.count === orbs.total && courses.every((c) => c.done) && towers.every((t) => t.activated)) {
     everythingShown = true;
-    setTimeout(() => {
-      audio.playCourseDone();
-      toast('三角之境 · 全數制霸', '每一座山、每一陣風都已走遍。你就是這片大地的旅人。', 7000, 'gold');
-    }, 1200);
+    window.setTimeout(() => {
+      audio.playAllDone();
+      wakeHud(7000);
+      const p = new THREE.Vector3(player.pos.x, player.pos.y + 2, player.pos.z);
+      sparkles.burst(p, 120, '#ffe27a', 14, 0.85, 2.4, 0.4);
+      sparkles.burst(p, 70, '#7ff0ff', 11, 0.7, 2.2, -0.2);
+    }, 900);
   }
 }
 
-// Continuous effects: wind trails, sprint dust, swim ripples, contextual hints
+// Continuous effects: wind trails, sprint dust, swim ripples, morphing buttons & wordless cues
 const tipL = new THREE.Vector3(), tipR = new THREE.Vector3();
 let dustAcc = 0;
 let inUpdraft = false;
@@ -942,30 +1360,69 @@ function updatePlayerFx(dt: number) {
     dustAcc = 0;
     sparkles.splash(tmpV.set(player.pos.x, WATER_LEVEL + 0.1, player.pos.z), 2, 1.5);
   }
+
   // Updraft cues
   const up = world.updraft(player.pos.x, player.pos.y + 1, player.pos.z);
   if (up > 0.05 && !inUpdraft) {
     inUpdraft = true;
-    if (player.gliding) audio.playUpdraft();
-    else tip('updraft', '上升氣流', `跳起後再按${JUMP_KEY}展開滑翔翼，乘風而上`);
-  } else if (up <= 0.01) inUpdraft = false;
-  // "Open your glider" prompt while falling from height
+    audio.playUpdraft();
+    if (player.gliding && !tipsShown.has('updraft')) {
+      tipsShown.add('updraft');
+      save();
+    }
+  } else if (up <= 0.01) {
+    inUpdraft = false;
+  }
+
+  // Morph touch jump / sprint buttons contextually so actions are self-evident
+  const canOpenGlide = player.mode === 'air' && player.airHeight > 2.0 && !player.exhausted && state === 'play';
+  const isClimb = player.climbing && state === 'play';
+  const isGlide = player.gliding && state === 'play';
+  iconJump.hidden = canOpenGlide || isClimb;
+  iconGlide.hidden = !canOpenGlide;
+  iconLeap.hidden = !isClimb;
+  btnJump.classList.toggle('glide-ready', canOpenGlide && player.airHeight > 5.0 && player.vel.y < -2);
+
+  iconSprint.hidden = isGlide;
+  iconDive.hidden = !isGlide;
+
+  // Wordless floating action silhouette cue (first-time high fall or standing in updraft on foot)
   const fallingHigh = player.mode === 'air' && player.airHeight > 6 && player.vel.y < -3 && state === 'play';
-  glideHint.classList.toggle('show', fallingHigh && !tipsShown.has('glide'));
+  const showGlideCue = fallingHigh && !tipsShown.has('glide');
+  const showUpdraftCue = !showGlideCue && inUpdraft && !player.gliding && !tipsShown.has('updraft') && state === 'play';
+  if (showGlideCue && !glideCuePlayed) {
+    glideCuePlayed = true;
+    audio.playGlideCue();
+  }
+  if (!fallingHigh) glideCuePlayed = false;
+
+  cueGlideSvg.hidden = !showGlideCue;
+  cueUpdraftSvg.hidden = !showUpdraftCue;
+  actionCueEl.classList.toggle('updraft', showUpdraftCue);
+  actionCueEl.classList.toggle('show', showGlideCue || showUpdraftCue);
 }
 
 // ------------------------------------------------------------ Camera
+const tmpCamPos = new THREE.Vector3();
+const tmpCineFocus = new THREE.Vector3();
+
 function updateCamera(dt: number) {
   const look = input.consumeLook();
+  const hasLook = Math.abs(look.x) + Math.abs(look.y) > 0.5;
   if (state === 'play' || state === 'vista') {
     camYaw -= look.x * 0.0055;
     camPitch = Math.min(1.25, Math.max(-0.32, camPitch + look.y * 0.0045));
   }
-  lookIdle = Math.abs(look.x) + Math.abs(look.y) > 0.5 ? 0 : lookIdle + dt;
+  if (hasLook && state === 'play') dismissOnboardHint();
+  lookIdle = hasLook ? 0 : lookIdle + dt;
+
+  if (vistaBreath > 0) vistaBreath = Math.max(0, vistaBreath - dt * 0.42);
+  const breathEase = Math.sin(Math.min(1, vistaBreath) * Math.PI);
 
   if (state === 'play') {
-    // Dynamic framing per movement mode
-    camDistTarget = player.gliding ? (player.diving ? 14.5 : 12.5) : player.climbing ? 9 : player.sprinting ? 11 : 10;
+    // Dynamic framing per movement mode + brief summit vista breath
+    camDistTarget = (player.gliding ? (player.diving ? 14.5 : 12.5) : player.climbing ? 9 : player.sprinting ? 11 : 10)
+      + breathEase * 2.6;
     // While gliding, ease the camera behind the flight direction
     if (player.gliding && lookIdle > 1.2) {
       const behind = player.facing + Math.PI;
@@ -973,8 +1430,13 @@ function updateCamera(dt: number) {
     }
   }
   const kick = state === 'play'
-    ? (player.sprinting ? 6 : 0) + (player.gliding ? 5 + Math.min(10, player.speedXZ * 0.35) + (player.diving ? 8 : 0) : 0)
-    : 0;
+    ? (player.sprinting ? 6 : 0)
+      + (player.gliding ? 5 + Math.min(10, player.speedXZ * 0.35) + (player.diving ? 8 : 0) : 0)
+      + breathEase * 4.5
+      - momentFocus * 4.5
+    : state === 'vista'
+      ? -momentFocus * 4.5
+      : 0;
   fovKick += (kick - fovKick) * Math.min(1, dt * 3);
   const fov = baseFov + fovKick;
   if (Math.abs(camera.fov - fov) > 0.05) { camera.fov = fov; camera.updateProjectionMatrix(); }
@@ -983,15 +1445,41 @@ function updateCamera(dt: number) {
   camLift += (camLiftTarget - camLift) * Math.min(1, dt * 2.2);
   const target = new THREE.Vector3(player.pos.x, player.pos.y + 1.6 + camLift, player.pos.z);
   camTarget.lerp(target, Math.min(1, dt * (player.gliding ? 14 : 10)));
+
+  // During shrine resonance Phase 2, smoothly swing gaze briefly toward the newly awakened updraft
+  if (state === 'cinematic' && cine?.updraft) {
+    const u = cine.updraft;
+    const w = smoothstep(1.3, 2.0, cine.t) * (1 - smoothstep(3.3, 4.1, cine.t));
+    tmpCineFocus.set(u.x, u.base + 14, u.z);
+    camLook.copy(camTarget).lerp(tmpCineFocus, w * 0.68);
+  } else {
+    camLook.copy(camTarget);
+  }
+
   const cp = Math.cos(camPitch);
-  camera.position.set(
+  tmpCamPos.set(
     camTarget.x + Math.sin(camYaw) * cp * camDist,
     camTarget.y + Math.sin(camPitch) * camDist,
     camTarget.z + Math.cos(camYaw) * cp * camDist,
   );
-  const floor = Math.max(terrain.height(camera.position.x, camera.position.z), WATER_LEVEL) + 0.8;
-  if (camera.position.y < floor) camera.position.y = floor;
-  camera.lookAt(camTarget);
+  const floor = Math.max(terrain.height(tmpCamPos.x, tmpCamPos.z), WATER_LEVEL) + 0.8;
+  if (tmpCamPos.y < floor) tmpCamPos.y = floor;
+
+  // Smooth opening swoop from title orbit down to the player (yields faster when player moves/looks)
+  if (introSwoop && state === 'play') {
+    const activeInput = hasLook || Math.hypot(input.move.x, input.move.y) > 0.12 || input.jump;
+    introSwoop.t += dt * (activeInput ? 2.6 : 1.0);
+    const p = Math.min(1, introSwoop.t / introSwoop.dur);
+    const e = 1 - Math.pow(1 - p, 3);
+    camera.position.lerpVectors(introSwoop.fromPos, tmpCamPos, e);
+    const lookPt = tmpCineFocus.lerpVectors(introSwoop.fromLook, camLook, e);
+    camera.lookAt(lookPt);
+    if (p >= 1) introSwoop = null;
+  } else {
+    camera.position.copy(tmpCamPos);
+    camera.lookAt(camLook);
+  }
+
   if (shake > 0.001) {
     camera.position.x += (Math.random() - 0.5) * shake;
     camera.position.y += (Math.random() - 0.5) * shake;
@@ -1055,11 +1543,17 @@ function frame() {
           if (d < 6.0) { nearTower = t; break; }
         }
       }
-      btnInteract.hidden = !nearTower;
       if (nearTower) {
-        btnInteractLabel.textContent = nearTower.activated ? '遠眺' : '共鳴';
+        if (!nearTower.activated && lastNearShrineIdx !== nearTower.index) {
+          audio.playShrineProximity();
+        }
+        lastNearShrineIdx = nearTower.index;
+        setInteractIcon(nearTower.activated ? 'vista' : 'resonate');
         btnInteract.classList.toggle('revisit', nearTower.activated);
+      } else {
+        lastNearShrineIdx = -1;
       }
+      btnInteract.hidden = !nearTower;
       if (input.action && nearTower) {
         if (!nearTower.activated) activate(nearTower);
         else startVista(nearTower);
@@ -1081,6 +1575,7 @@ function frame() {
       chest.set(player.pos.x, player.pos.y + 1.0, player.pos.z);
       orbs.update(elapsed, dt, chest, false);
       for (const c of courses) c.update(elapsed, dt, new THREE.Vector3(0, -9999, 0));
+      actionCueEl.classList.remove('show');
       if (state === 'vista') {
         checkMoments(dt);
         if (input.action || input.jump || Math.hypot(input.move.x, input.move.y) > 0.18) {
@@ -1089,6 +1584,8 @@ function frame() {
           openMap();
         }
       } else if (state === 'cinematic') {
+        audio.updateMomentDwell(0);
+        momentFrameEl.style.setProperty('--dwell', '0');
         updateCinematic(dt);
       } else if (state === 'map') {
         if (input.map) {
@@ -1107,7 +1604,7 @@ function frame() {
     }
     updateCompass();
     updateStamina(dt);
-    updateTrialHud();
+    updateTrialHud(dt);
   }
 
   // Smooth regional atmosphere blending (clear meadow baseline on title overview)
@@ -1198,39 +1695,93 @@ window.addEventListener('resize', resize);
 resize();
 
 // ------------------------------------------------------------ Title
-const hasSave = !!loadSave();
-$('btn-reset').hidden = !hasSave;
-$('btn-start').textContent = hasSave ? '繼續探索' : '開始探索';
+const existingSave = loadSave();
+const btnReset = $('btn-reset');
+const resetIdleIcon = btnReset.querySelector('.icon-reset-idle') as HTMLElement;
+const resetConfirmIcon = btnReset.querySelector('.icon-reset-confirm') as HTMLElement;
+btnReset.hidden = !existingSave;
+
+// Subtle 6-crystal progress bar under the title emblem when returning with a save
+if (existingSave) {
+  const actSet = new Set(existingSave.activated ?? []);
+  titleProgress.innerHTML = '';
+  for (let i = 0; i < TOWER_DEFS.length; i++) {
+    const pip = document.createElement('span');
+    pip.className = actSet.has(i) ? 'tp-pip on' : 'tp-pip';
+    titleProgress.appendChild(pip);
+  }
+  titleProgress.hidden = false;
+}
 
 function startGame() {
+  const hadSave = !!loadSave();
   audio.unlock();
   applySave();
   updateCounter();
+
+  // Capture title orbit camera for a smooth swoop down behind the player
+  const fromPos = camera.position.clone();
+  const fromLook = new THREE.Vector3(0, 20, 0);
   camLift = 0;
   camLiftTarget = 0;
   camDist = 10;
   camDistTarget = 10;
+  camPitch = 0.24;
   camTarget.set(player.pos.x, player.pos.y + 1.6, player.pos.z);
+  introSwoop = { fromPos, fromLook, t: 0, dur: 2.1 };
+
   titleScreen.classList.add('leaving');
-  setTimeout(() => { titleScreen.hidden = true; }, 600);
+  window.setTimeout(() => { titleScreen.hidden = true; }, 650);
   hud.hidden = false;
   state = 'play';
-  if (!loadSave()) {
-    setTimeout(() => showRegionBanner(currentBiome, true), 650);
-    setTimeout(() => toast('踏入未知的山野', '追隨金色靈光 · 攀上群峰 · 乘風滑翔 · 尋訪古碑與奇景', 4800), 5200);
+  wakeHud(5000);
+
+  if (!hadSave) {
+    window.setTimeout(() => showRegionBanner(currentBiome, true), 1150);
+    onboardShowTimer = window.setTimeout(() => {
+      if (state === 'play' && !onboardHint.classList.contains('gone')) {
+        onboardHint.classList.add('show');
+      }
+    }, 900);
+  } else {
+    onboardHint.classList.add('gone');
   }
 }
+
 $('btn-start').addEventListener('click', startGame);
-$('btn-reset').addEventListener('click', () => {
+
+// 2-step safe wordless reset (1st tap arms red checkmark for 3.5s; 2nd tap clears save)
+let resetArmed = false;
+let resetArmTimer = 0;
+function disarmReset() {
+  resetArmed = false;
+  clearTimeout(resetArmTimer);
+  btnReset.classList.remove('armed');
+  resetIdleIcon.hidden = false;
+  resetConfirmIcon.hidden = true;
+}
+btnReset.addEventListener('click', () => {
+  if (!resetArmed) {
+    resetArmed = true;
+    btnReset.classList.add('armed');
+    resetIdleIcon.hidden = true;
+    resetConfirmIcon.hidden = false;
+    resetArmTimer = window.setTimeout(disarmReset, 3500);
+    return;
+  }
+  disarmReset();
   localStorage.removeItem(SAVE_KEY);
   allDoneShown = false;
   everythingShown = false;
   startGame();
 });
+
 window.addEventListener('keydown', (e) => {
   if (state !== 'title') audio.unlock();
   if (e.code === 'KeyT' && !e.repeat && (state === 'play' || state === 'vista')) {
     cycleTimeOfDay();
+  } else if (e.code === 'Escape' && state === 'map') {
+    closeMap();
   }
 }, { passive: true });
 
@@ -1251,6 +1802,7 @@ if (import.meta.env.DEV) {
     },
     snapAt: (x: number, z: number, yaw: number, pitch: number, tod: number) => {
       camOverride = null;
+      introSwoop = null;
       const h = Math.max(world.ground(x, z, 0), WATER_LEVEL);
       player.place(x, h, z);
       camYaw = yaw;
@@ -1278,6 +1830,3 @@ if (import.meta.env.DEV) {
     },
   };
 }
-
-// Keep the glide hint copy in sync with the platform
-glideHint.textContent = `再按${JUMP_KEY}展開滑翔翼 · 按住${SPRINT_KEY}俯衝`;

@@ -34,6 +34,9 @@ export class NatureAudio {
   private leavesGain!: GainNode;
   private waterFilter!: BiquadFilterNode;
   private waterGain!: GainNode;
+  private momentGain!: GainNode;
+  private momentOscA!: OscillatorNode;
+  private momentOscB!: OscillatorNode;
   private noiseBuf!: AudioBuffer;
 
   private started = false;
@@ -152,6 +155,25 @@ export class NatureAudio {
     this.waterFilter.connect(this.waterGain);
     this.waterGain.connect(this.master);
     waterSrc.start(0, 4.9);
+
+    // 4. Ethereal fifth-harmonic shimmer pad for Temporal Moment dwell feedback
+    this.momentOscA = ctx.createOscillator();
+    this.momentOscB = ctx.createOscillator();
+    this.momentOscA.type = 'sine';
+    this.momentOscB.type = 'sine';
+    this.momentOscA.frequency.value = 440;
+    this.momentOscB.frequency.value = 659.25;
+    this.momentGain = ctx.createGain();
+    this.momentGain.gain.value = 0.0;
+    this.momentOscA.connect(this.momentGain);
+    this.momentOscB.connect(this.momentGain);
+    this.momentGain.connect(this.reverb);
+    const dryM = ctx.createGain();
+    dryM.gain.value = 0.35;
+    this.momentGain.connect(dryM);
+    dryM.connect(this.master);
+    this.momentOscA.start(0);
+    this.momentOscB.start(0);
   }
 
   /** Paul Kellet pink noise with crossfaded loop seam so there is never a click. */
@@ -655,4 +677,79 @@ export class NatureAudio {
   }
 
   playUpdraft() { this.noiseBurst('bandpass', 300, 1400, 0.8, 0.07, 0.9, 0.25); }
+
+  /** Gently swells a serene harmonic fifth while dwelling inside a Temporal Moment (0..1). */
+  updateMomentDwell(progress: number) {
+    if (!this.ctx || !this.momentGain) return;
+    const now = this.ctx.currentTime;
+    const p = this._muted || this.ctx.state !== 'running' ? 0 : Math.max(0, Math.min(1, progress));
+    const vol = p * p * 0.028;
+    this.momentGain.gain.setTargetAtTime(vol, now, 0.14);
+    this.momentOscA.frequency.setTargetAtTime(440 + p * 7.5, now, 0.2);
+    this.momentOscB.frequency.setTargetAtTime(659.25 + p * 11.2, now, 0.2);
+  }
+
+  /** Distinct 3-note celestial shimmer replacing time-of-day text toasts. */
+  playTimeShift(phase: 'morning' | 'sunset' | 'night' | 'dawn') {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const chords: Record<typeof phase, number[]> = {
+      morning: [440, 554.37, 659.25],
+      sunset: [392, 493.88, 587.33],
+      night: [587.33, 739.99, 1174.66],
+      dawn: [329.63, 440, 587.33],
+    };
+    chords[phase].forEach((f, i) => {
+      this.softTone(ctx, now + i * 0.11, f, 2.4, 0.024);
+    });
+    if (phase === 'night') this.bell(1318.5, 0.22, 0.016, 1.8);
+  }
+
+  /** Soft crystalline lift when stamina finishes recovering from exhaustion. */
+  playRecovered() {
+    this.bell(587.33, 0, 0.024, 1.1);
+    this.bell(880, 0.09, 0.026, 1.4);
+  }
+
+  /** Warm singing-bowl hum when stepping onto an unactivated shrine altar. */
+  playShrineProximity() {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    this.softTone(ctx, now, 220, 2.2, 0.026);
+    this.softTone(ctx, now + 0.08, 329.63, 2.0, 0.018);
+  }
+
+  /** Gentle countdown pulse in the final moments of a wind trial ring window. */
+  playTrialTick(urgent: boolean) {
+    this.bell(urgent ? 987.77 : 783.99, 0, urgent ? 0.026 : 0.018, 0.35);
+  }
+
+  /** Airy summit wind-chime when collecting a mountain-peak orb. */
+  playPeakVista() {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    this.softTone(ctx, now, 587.33, 3.0, 0.022);
+    this.softTone(ctx, now + 0.16, 880, 3.4, 0.022);
+    this.bell(1174.66, 0.3, 0.018, 2.0);
+  }
+
+  /** Whisper-soft airy prompt when the glider silhouette first appears mid-fall. */
+  playGlideCue() {
+    this.bell(739.99, 0, 0.018, 0.9);
+    this.noiseBurst('bandpass', 500, 1200, 1.2, 0.024, 0.25, 0.02);
+  }
+
+  /** Grand warm harmonic bloom when all six shrines are resonated. */
+  playAllDone() {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    [146.83, 220, 293.66, 369.99, 440, 587.33, 739.99, 880].forEach((f, i) => {
+      this.softTone(ctx, now + i * 0.13, f, 5.2, i < 2 ? 0.04 : 0.03);
+    });
+    [1174.66, 1479.98, 1760].forEach((f, i) => this.bell(f, 0.7 + i * 0.14, 0.024, 2.6));
+  }
 }
