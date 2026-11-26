@@ -98,7 +98,7 @@ export class Terrain {
     const fbmLow = this.fbm(x * 0.0042, z * 0.0042, 5);
     const bumps = this.n3.noise(x * 0.025, z * 0.025);
 
-    // 0: 翠野 — Classic rolling Hyrule hills & gentle ridges
+    // 0: 翠野 — Classic rolling emerald hills & gentle ridges
     let hMeadow = 0;
     if (w[0] > 0.002) {
       const mask = smoothstep(-0.15, 0.45, this.n3.noise(x * 0.0028 + 50, z * 0.0028 - 30));

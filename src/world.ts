@@ -3,7 +3,7 @@ import { Terrain, SEG, HALF, WATER_LEVEL, WORLD_SIZE, smoothstep } from './terra
 import { mulberry32, Simplex2 } from './noise';
 import { BIOMES, sampleBiomeWeights, sampleDominantBiome } from './biomes';
 import {
-  BOTW_PALETTE,
+  CEL_PALETTE,
   CEL_SAFE_MATH_GLSL,
   celUniforms,
   createAuroraMaterial,
@@ -33,10 +33,10 @@ export const TOWER_DEFS: TowerDef[] = [
 ];
 
 export const COLORS = {
-  skyTop: BOTW_PALETTE.skyZenith,
-  horizon: BOTW_PALETTE.skyHorizon,
-  inactive: BOTW_PALETTE.inactive,
-  active: BOTW_PALETTE.active,
+  skyTop: CEL_PALETTE.skyZenith,
+  horizon: CEL_PALETTE.skyHorizon,
+  inactive: CEL_PALETTE.inactive,
+  active: CEL_PALETTE.active,
 };
 
 // ---------------------------------------------------------------- Geometry helpers
@@ -74,7 +74,7 @@ function mergeGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeometry {
 
 /**
  * Recomputes smooth radial normals pointing outward from a foliage center
- * with gentle upward lift — gives stylized canopies a soft painted Ghibli/BotW volume.
+ * with gentle upward lift — gives stylized canopies a soft painted volume.
  */
 function applyRadialFoliageNormals(geo: THREE.BufferGeometry, centerY: number, upBias = 0.45, blend = 0.78) {
   geo.computeVertexNormals();
@@ -334,7 +334,7 @@ export function createSky(sunDir: THREE.Vector3): THREE.Mesh {
         vec3 d = safeNormalize(vDir);
         float h = clamp(d.y, 0.0, 1.0);
 
-        // Three-band BotW sky gradient (adapts smoothly across dawn, day, sunset & night)
+        // Three-band painterly sky gradient (adapts smoothly across dawn, day, sunset & night)
         vec3 c = mix(uHorizon, uMid, smoothstep(0.0, 0.28, h));
         c = mix(c, uZenith, smoothstep(0.22, 0.82, h));
 
@@ -691,7 +691,7 @@ export function createVegetation(terrain: Terrain, avoid: { x: number; z: number
       continue;
     }
 
-    // 0: 翠野 — Classic sunlit Hyrule meadow trees
+    // 0: 翠野 — Classic sunlit meadow trees
     if (fn < 0.04 + rand() * 0.25 || h > 54) continue;
     const sc = 0.72 + rand() * 0.68;
     q.setFromAxisAngle(up, rand() * Math.PI * 2);
@@ -858,7 +858,7 @@ export function createVegetation(terrain: Terrain, avoid: { x: number; z: number
   return group;
 }
 
-// ---------------------------------------------------------------- Dynamic BotW Biome Grass & Wildflowers
+// ---------------------------------------------------------------- Dynamic Biome Grass & Wildflowers
 function cellHash(ix: number, iz: number, salt: number): number {
   let h = Math.imul(ix, 374761393) + Math.imul(iz, 668265263) + Math.imul(salt, 1442695041);
   h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -994,7 +994,7 @@ export class DynamicGrassField {
       // Frosted pale alpine tufts
       this.c.setHSL(0.50 + (h7 - 0.5) * 0.04, 0.24 + h8 * 0.10, 0.50 + h9 * 0.10);
     } else {
-      // Classic sunlit Hyrule meadow green
+      // Classic sunlit meadow green
       this.c.setHSL(0.245 + patch * 0.045 + (h7 - 0.5) * 0.025, 0.64 + h8 * 0.12, 0.32 + patch * 0.08 + h9 * 0.05);
     }
     this.grass.setColorAt(idx, this.c);

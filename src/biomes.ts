@@ -54,7 +54,7 @@ export interface BiomeDef {
 }
 
 export const BIOMES: BiomeDef[] = [
-  // 0: 翠野 — Central sunlit Hyrule meadow (baseline)
+  // 0: 翠野 — Central sunlit emerald meadow (baseline)
   {
     index: 0,
     id: 'meadow',
