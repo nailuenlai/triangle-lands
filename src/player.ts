@@ -653,6 +653,12 @@ export class Player {
       aL = -0.9; aR = -0.9; aLz = 0.5; aRz = -0.5;
       fL = 0.2; fR = -0.2;
       lean = this.vel.y > 0 ? -0.05 : 0.08;
+    } else if (this.exhausted) {
+      const pant = Math.sin(t * 5.8);
+      lean = 0.28 + pant * 0.05;
+      bodyY = -0.04 + pant * 0.025;
+      aL = 0.22 + pant * 0.08; aR = 0.22 + pant * 0.08;
+      aLz = 0.14; aRz = -0.14;
     } else {
       const br = Math.sin(t * 1.8) * 0.04;
       aL = br; aR = -br; aLz = 0.08; aRz = -0.08;
