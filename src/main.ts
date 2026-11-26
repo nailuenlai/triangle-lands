@@ -7,6 +7,7 @@ import './style.css';
 import { Terrain, WATER_LEVEL, smoothstep, type Flatten } from './terrain';
 import {
   createSky, createTerrainMesh, createWater, createVegetation, createClouds,
+  createAurora, createKarstCloudSea, BirdFlocks,
   DynamicGrassField, Tower, TOWER_DEFS, REVEAL_RADIUS, START_POS, COLORS,
 } from './world';
 import { Player, type WorldQuery } from './player';
@@ -15,7 +16,9 @@ import { GameMap } from './map';
 import { NatureAudio } from './audio';
 import { Particles, AmbientMotes } from './fx';
 import { createWilds, RingCourse, type CourseEvent } from './collectibles';
-import { updateCelTime, updateDayNight, DAY_PRESETS } from './cel';
+import { updateCelTime, updateDayNight, updateBiomeAtmosphere, celUniforms, DAY_PRESETS } from './cel';
+import { BIOMES, BIOME_COUNT, sampleBiomeWeights, sampleDominantBiome } from './biomes';
+import { WONDER_DEFS, MOMENT_DEFS, Wonder } from './landmarks';
 
 // ------------------------------------------------------------ DOM
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -33,6 +36,10 @@ const btnAudio = $('btn-audio');
 const iconAudioOn = $('icon-audio-on');
 const iconAudioOff = $('icon-audio-off');
 const toastEl = $('toast');
+const regionBannerEl = $('region-banner');
+const regionTagEl = $('region-tag');
+const regionNameEl = $('region-name');
+const regionSubEl = $('region-sub');
 const towerNum = $('tower-count-num');
 const orbNum = $('orb-count-num');
 const orbTotal = $('orb-count-total');
@@ -51,7 +58,7 @@ const floatLayer = $('float-layer');
 const glideHint = $('glide-hint');
 
 // ------------------------------------------------------------ Save & Settings
-const SAVE_KEY = 'triangle-explorer-v1';
+const SAVE_KEY = 'triangle-explorer-v2';
 const MUTE_KEY = 'triangle-explorer-muted';
 interface SaveData {
   discovered: number[];
@@ -61,6 +68,9 @@ interface SaveData {
   courses?: number[];
   tips?: string[];
   explored?: string;
+  visitedBiomes?: number[];
+  wonders?: string[];
+  moments?: string[];
 }
 const loadSave = (): SaveData | null => {
   try { return JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch { return null; }
@@ -176,20 +186,37 @@ function applyDayNight(tod: number) {
 applyDayNight(timeOfDay);
 
 const flats: Flatten[] = [
-  ...TOWER_DEFS.map((d) => ({ x: d.x, z: d.z, r: 12 })),
-  { ...START_POS, r: 15 },
+  ...TOWER_DEFS.map((d) => ({ x: d.x, z: d.z, r: 13 })),
+  { ...START_POS, r: 16 },
+  ...WONDER_DEFS.map((w) => w.flat),
 ];
 const terrain = new Terrain(flats);
 const sky = createSky(sunDir);
 scene.add(sky, createTerrainMesh(terrain), createWater(terrain));
-scene.add(createVegetation(terrain, flats.map((f) => ({ x: f.x, z: f.z, r: f.r * 0.72 }))));
-const grassField = new DynamicGrassField(terrain);
+
+const vegAvoid = [
+  ...TOWER_DEFS.map((d) => ({ x: d.x, z: d.z, r: 10.5 })),
+  { x: START_POS.x, z: START_POS.z, r: 12 },
+  ...WONDER_DEFS.map((w) => ({ x: w.x, z: w.z, r: w.avoidR })),
+];
+scene.add(createVegetation(terrain, vegAvoid));
+
+const grassField = new DynamicGrassField(
+  terrain,
+  WONDER_DEFS.map((w) => ({ x: w.x, z: w.z, r: w.avoidR * 0.55 })),
+);
 scene.add(grassField.group);
 const clouds = createClouds();
-scene.add(clouds);
+const aurora = createAurora();
+const karstCloudSea = createKarstCloudSea();
+const birdFlocks = new BirdFlocks();
+scene.add(clouds, aurora, karstCloudSea, birdFlocks.mesh);
 
 const towers = TOWER_DEFS.map((d, i) => new Tower(d, i, terrain.height(d.x, d.z)));
 towers.forEach((t) => scene.add(t.group));
+
+const wonders = WONDER_DEFS.map((d) => new Wonder(d, terrain));
+wonders.forEach((w) => scene.add(w.group));
 
 const wilds = createWilds(terrain, towers.map((t) => ({ x: t.def.x, z: t.def.z, base: t.base })), START_POS);
 const { orbs, updrafts, courses } = wilds;
@@ -199,7 +226,7 @@ courses.forEach((c) => scene.add(c.group));
 
 const sparkles = new Particles(900, true);
 const dust = new Particles(400, false);
-const ambientMotes = new AmbientMotes(260);
+const ambientMotes = new AmbientMotes(320);
 scene.add(sparkles.points, dust.points, ambientMotes.points);
 
 const player = new Player();
@@ -230,6 +257,17 @@ const world: WorldQuery = {
         if (d < pil.r && d > 1e-4) {
           p.x = pil.x + (dx / d) * pil.r;
           p.z = pil.z + (dz / d) * pil.r;
+        }
+      }
+    }
+    for (const w of wonders) {
+      if (Math.hypot(p.x - w.def.x, p.z - w.def.z) > 26) continue;
+      for (const col of w.colliders) {
+        const dx = p.x - col.x, dz = p.z - col.z;
+        const d = Math.hypot(dx, dz);
+        if (d < col.r && d > 1e-4) {
+          p.x = col.x + (dx / d) * col.r;
+          p.z = col.z + (dz / d) * col.r;
         }
       }
     }
@@ -299,6 +337,64 @@ let elapsed = 0;
 let allDoneShown = false;
 let everythingShown = false;
 const tipsShown = new Set<string>();
+const visitedBiomes = new Set<number>();
+const capturedMoments = new Set<string>();
+const momentDwell = new Map<string, number>();
+const curBiomeWeights = new Float32Array(BIOME_COUNT);
+let currentBiome = 0;
+let pendingBiome = 0;
+let pendingBiomeT = 0;
+const regionLastShown = new Map<number, number>();
+let regionBannerTimer = 0;
+
+function showRegionBanner(biomeIdx: number, isFirst: boolean) {
+  const b = BIOMES[biomeIdx];
+  if (!b) return;
+  clearTimeout(regionBannerTimer);
+  regionTagEl.hidden = !isFirst;
+  regionNameEl.textContent = b.name;
+  regionSubEl.textContent = b.subtitle;
+  regionBannerEl.setAttribute('aria-hidden', 'false');
+  regionBannerEl.classList.remove('show');
+  void regionBannerEl.offsetWidth;
+  regionBannerEl.classList.add('show');
+  audio.playRegionEnter(biomeIdx, isFirst);
+  regionBannerTimer = window.setTimeout(() => {
+    regionBannerEl.classList.remove('show');
+    regionBannerEl.setAttribute('aria-hidden', 'true');
+  }, isFirst ? 4400 : 3400);
+}
+
+function updateRegionTracking(dt: number) {
+  const { index, weight } = sampleDominantBiome(player.pos.x, player.pos.z);
+  if (index === currentBiome) {
+    pendingBiome = currentBiome;
+    pendingBiomeT = 0;
+    return;
+  }
+  if (weight < 0.42) return;
+  if (index !== pendingBiome) {
+    pendingBiome = index;
+    pendingBiomeT = 0;
+  } else {
+    pendingBiomeT += dt;
+    if (pendingBiomeT >= 0.75) {
+      currentBiome = index;
+      pendingBiomeT = 0;
+      const isFirst = !visitedBiomes.has(index);
+      const lastT = regionLastShown.get(index) ?? -999;
+      if (isFirst) {
+        visitedBiomes.add(index);
+        regionLastShown.set(index, elapsed);
+        showRegionBanner(index, true);
+        save();
+      } else if (elapsed - lastT > 28) {
+        regionLastShown.set(index, elapsed);
+        showRegionBanner(index, false);
+      }
+    }
+  }
+}
 
 function staminaMaxFor() {
   const act = towers.filter((t) => t.activated).length;
@@ -316,10 +412,15 @@ function applySave() {
   const s = loadSave();
   gameMap.reset();
   towers.forEach((t) => { t.discovered = false; t.setActivated(false); });
+  wonders.forEach((w) => { w.discovered = false; });
   updrafts.forEach((u) => { if (u.towerIndex >= 0) u.active = false; });
   orbs.defs.forEach((d, i) => { orbs.setCollected(i, false); if (d.kind === 'reward') orbs.hide(i); });
   courses.forEach((c) => c.setDone(false));
   tipsShown.clear();
+  visitedBiomes.clear();
+  capturedMoments.clear();
+  momentDwell.clear();
+  regionLastShown.clear();
   if (s) {
     s.discovered.forEach((i) => towers[i] && (towers[i].discovered = true));
     s.activated.forEach((i) => {
@@ -334,6 +435,12 @@ function applySave() {
     (s.orbs ?? []).forEach((i) => i < orbs.total && orbs.setCollected(i, true));
     (s.courses ?? []).forEach((i) => courses[i]?.setDone(true));
     (s.tips ?? []).forEach((t) => tipsShown.add(t));
+    (s.visitedBiomes ?? []).forEach((b) => b >= 0 && b < BIOME_COUNT && visitedBiomes.add(b));
+    (s.wonders ?? []).forEach((id) => {
+      const w = wonders.find((x) => x.def.id === id);
+      if (w) w.discovered = true;
+    });
+    (s.moments ?? []).forEach((id) => capturedMoments.add(id));
     gameMap.loadTrail(s.explored);
   }
   resetPlayer();
@@ -342,6 +449,12 @@ function applySave() {
     const gy = Math.max(world.ground(gx, gz, 0), WATER_LEVEL - 1.1);
     player.place(gx, gy, gz);
   }
+  const startBio = sampleDominantBiome(player.pos.x, player.pos.z).index;
+  currentBiome = startBio;
+  pendingBiome = startBio;
+  visitedBiomes.add(startBio);
+  sampleBiomeWeights(player.pos.x, player.pos.z, curBiomeWeights);
+  updateBiomeAtmosphere(curBiomeWeights, 1, true);
   gameMap.explore(player.pos.x, player.pos.z);
 }
 
@@ -354,6 +467,9 @@ function save() {
     courses: courses.filter((c) => c.done).map((c) => c.id),
     tips: [...tipsShown],
     explored: gameMap.serializeTrail(),
+    visitedBiomes: [...visitedBiomes],
+    wonders: wonders.filter((w) => w.discovered).map((w) => w.def.id),
+    moments: [...capturedMoments],
   };
   localStorage.setItem(SAVE_KEY, JSON.stringify(data));
 }
@@ -516,8 +632,10 @@ function updateStamina(dt: number) {
 let mapHideTimer = 0;
 function progressText() {
   const n = towers.filter((t) => t.activated).length;
+  const w = wonders.filter((x) => x.discovered).length;
+  const m = capturedMoments.size;
   const c = courses.filter((c) => c.done).length;
-  return `古碑 ${n}/${towers.length} · 靈光 ${orbs.count}/${orbs.total} · 試煉 ${c}/${courses.length}`;
+  return `古碑 ${n}/${towers.length} · 靈光 ${orbs.count}/${orbs.total} · 奇景 ${w}/${wonders.length} · 時景 ${m}/${MOMENT_DEFS.length} · 試煉 ${c}/${courses.length}`;
 }
 function openMap(animate = false) {
   clearTimeout(mapHideTimer);
@@ -526,7 +644,7 @@ function openMap(animate = false) {
   audio.playMap(true);
   $('map-progress').textContent = progressText();
   mapOverlay.hidden = false;
-  gameMap.draw(mapCanvas, towers, elapsed);
+  gameMap.draw(mapCanvas, towers, elapsed, visitedBiomes, wonders);
   void mapOverlay.offsetWidth;
   mapOverlay.classList.add('open');
 }
@@ -549,9 +667,10 @@ function closeMap() {
   }
 }
 
-// ------------------------------------------------------------ Proximity Discovery
+// ------------------------------------------------------------ Proximity & Sight Discovery
 const ndc = new THREE.Vector3();
 const losPt = new THREE.Vector3();
+const lookDirV = new THREE.Vector3();
 function lineOfSight(from: THREE.Vector3, to: THREE.Vector3): boolean {
   const steps = 44;
   for (let i = 2; i < steps; i++) {
@@ -577,6 +696,56 @@ function checkDiscovery(dt: number) {
     audio.playDiscover();
     toast('林間浮現微光', `發現「${t.def.name}」 · 已記於方位羅盤`);
     save();
+  }
+  // Six regional Wonders: simply seeing the landmark with an unobstructed view discovers it
+  for (const w of wonders) {
+    if (w.discovered) continue;
+    const dist = Math.hypot(w.def.x - player.pos.x, w.def.z - player.pos.z);
+    if (dist > w.def.sightDist) continue;
+    ndc.copy(w.sightPos).project(camera);
+    if (Math.abs(ndc.x) > 0.86 || Math.abs(ndc.y) > 0.86 || ndc.z <= 0 || ndc.z > 1) continue;
+    if (!lineOfSight(camera.position, w.sightPos)) continue;
+    w.discovered = true;
+    audio.playWonderDiscover();
+    toast(`發現奇景 · ${w.def.name}`, `${w.def.desc} · 已記於大地圖`, 4600, 'gold');
+    save();
+  }
+}
+
+/** Five Temporal Vistas (時景): pause calmly in the right place & time of day to collect. */
+function checkMoments(dt: number) {
+  if (capturedMoments.size >= MOMENT_DEFS.length) return;
+  const { index: biomeIndex, weight: biomeWeight } = sampleDominantBiome(player.pos.x, player.pos.z);
+  camera.getWorldDirection(lookDirV);
+  const calm = state === 'vista' || player.speedXZ < 6.5;
+  const ctx = {
+    biomeIndex,
+    biomeWeight,
+    x: player.pos.x,
+    y: player.pos.y,
+    z: player.pos.z,
+    timeOfDay,
+    nightFactor: celUniforms.uNightFactor.value,
+    sunsetFactor: celUniforms.uSunsetFactor.value,
+    lookDir: lookDirV,
+  };
+  for (const m of MOMENT_DEFS) {
+    if (capturedMoments.has(m.id)) continue;
+    const prev = momentDwell.get(m.id) ?? 0;
+    if (calm && m.matches(ctx)) {
+      const next = prev + dt;
+      if (next >= 2.2) {
+        capturedMoments.add(m.id);
+        momentDwell.delete(m.id);
+        audio.playMomentCapture();
+        toast(`收錄時景 · ${m.name}`, m.desc, 5000, 'gold');
+        save();
+      } else {
+        momentDwell.set(m.id, next);
+      }
+    } else if (prev > 0) {
+      momentDwell.set(m.id, Math.max(0, prev - dt * 0.6));
+    }
   }
 }
 
@@ -854,6 +1023,10 @@ let lastT = performance.now();
 let saveTimer = 0;
 const chest = new THREE.Vector3();
 
+// Optional dev-only camera override for clean visual verification shots
+let camOverride: { pos: THREE.Vector3; look: THREE.Vector3 } | null = null;
+const titleBiomeWeights = new Float32Array([1, 0, 0, 0, 0, 0]);
+
 function frame() {
   const now = performance.now();
   const dt = Math.min((now - lastT) / 1000, 0.05);
@@ -892,7 +1065,9 @@ function frame() {
         else startVista(nearTower);
       }
       if (input.map) openMap();
+      updateRegionTracking(dt);
       checkDiscovery(dt);
+      checkMoments(dt);
 
       chest.set(player.pos.x, player.pos.y + 1.0, player.pos.z);
       onOrbs(orbs.update(elapsed, dt, chest, true));
@@ -907,6 +1082,7 @@ function frame() {
       orbs.update(elapsed, dt, chest, false);
       for (const c of courses) c.update(elapsed, dt, new THREE.Vector3(0, -9999, 0));
       if (state === 'vista') {
+        checkMoments(dt);
         if (input.action || input.jump || Math.hypot(input.move.x, input.move.y) > 0.18) {
           exitVista();
         } else if (input.map) {
@@ -919,14 +1095,29 @@ function frame() {
           closeMap();
         } else {
           if (mapAnimating) mapAnimating = gameMap.advance(dt);
-          gameMap.draw(mapCanvas, towers, elapsed);
+          gameMap.draw(mapCanvas, towers, elapsed, visitedBiomes, wonders);
         }
       }
     }
-    updateCamera(dt);
+    if (camOverride) {
+      camera.position.copy(camOverride.pos);
+      camera.lookAt(camOverride.look);
+    } else {
+      updateCamera(dt);
+    }
     updateCompass();
     updateStamina(dt);
     updateTrialHud();
+  }
+
+  // Smooth regional atmosphere blending (clear meadow baseline on title overview)
+  if (state === 'title') {
+    updateBiomeAtmosphere(titleBiomeWeights, dt, false);
+  } else {
+    const focusX = camOverride ? camOverride.pos.x : player.pos.x;
+    const focusZ = camOverride ? camOverride.pos.z : player.pos.z;
+    sampleBiomeWeights(focusX, focusZ, curBiomeWeights);
+    updateBiomeAtmosphere(curBiomeWeights, dt, false);
   }
 
   audio.update(dt, {
@@ -939,6 +1130,8 @@ function frame() {
     aerial: state === 'cinematic' || state === 'vista' || player.gliding,
     glide: player.gliding ? Math.min(1, (player.speedXZ + Math.abs(player.vel.y)) / 22) : 0,
     climbing: player.climbing,
+    biomeIndex: state === 'title' ? 0 : currentBiome,
+    nightFactor: celUniforms.uNightFactor.value,
   });
 
   updateCelTime(elapsed);
@@ -961,15 +1154,18 @@ function frame() {
     grassField.group.visible = false;
     ambientMotes.points.visible = false;
   } else {
-    updateSunShadow(player.pos.x, player.pos.y, player.pos.z);
+    const focusPos = camOverride ? camOverride.pos : player.pos;
+    updateSunShadow(focusPos.x, focusPos.y, focusPos.z);
     grassField.group.visible = true;
-    grassField.update(player.pos);
+    grassField.update(focusPos);
     ambientMotes.points.visible = true;
-    ambientMotes.update(player.pos);
+    ambientMotes.update(focusPos, dt, curBiomeWeights);
   }
 
   towers.forEach((t) => t.update(elapsed, dt, player.pos, state === 'title'));
+  wonders.forEach((w) => w.update(elapsed));
   updrafts.forEach((u) => u.update(elapsed, dt, sparkles, state === 'title' ? camera.position : player.pos));
+  birdFlocks.update(elapsed);
   sparkles.update(dt);
   dust.update(dt);
   clouds.children.forEach((c) => {
@@ -1020,7 +1216,8 @@ function startGame() {
   hud.hidden = false;
   state = 'play';
   if (!loadSave()) {
-    setTimeout(() => toast('踏入未知的山野', '追隨金色靈光 · 攀上群峰 · 乘風滑翔 · 尋找古碑', 4800), 900);
+    setTimeout(() => showRegionBanner(currentBiome, true), 650);
+    setTimeout(() => toast('踏入未知的山野', '追隨金色靈光 · 攀上群峰 · 乘風滑翔 · 尋訪古碑與奇景', 4800), 5200);
   }
 }
 $('btn-start').addEventListener('click', startGame);
@@ -1041,10 +1238,30 @@ frame();
 
 if (import.meta.env.DEV) {
   (window as unknown as Record<string, unknown>).__game = {
-    player, towers, terrain, gameMap, activate, startVista, openMap, audio, orbs, updrafts, courses, world,
+    player, towers, wonders, terrain, gameMap, activate, startVista, openMap, audio, orbs, updrafts, courses, world,
+    BIOMES, visitedBiomes, capturedMoments, showRegionBanner,
     setYaw: (y: number) => { camYaw = y; },
     setPitch: (p: number) => { camPitch = p; },
     setTime: (tod: number) => { timeGlide = null; timeOfDay = ((tod % 1) + 1) % 1; applyDayNight(timeOfDay); },
+    setCamOverride: (pos: [number, number, number] | null, look?: [number, number, number]) => {
+      if (!pos || !look) { camOverride = null; return; }
+      camOverride = { pos: new THREE.Vector3(...pos), look: new THREE.Vector3(...look) };
+      sampleBiomeWeights(pos[0], pos[2], curBiomeWeights);
+      updateBiomeAtmosphere(curBiomeWeights, 1, true);
+    },
+    snapAt: (x: number, z: number, yaw: number, pitch: number, tod: number) => {
+      camOverride = null;
+      const h = Math.max(world.ground(x, z, 0), WATER_LEVEL);
+      player.place(x, h, z);
+      camYaw = yaw;
+      camPitch = pitch;
+      camTarget.set(x, h + 1.6, z);
+      timeGlide = null;
+      timeOfDay = ((tod % 1) + 1) % 1;
+      applyDayNight(timeOfDay);
+      sampleBiomeWeights(x, z, curBiomeWeights);
+      updateBiomeAtmosphere(curBiomeWeights, 1, true);
+    },
     getState: () => state,
     /** Deterministically step the player (dev testing only). */
     sim: (n: number, mx: number, my: number, jumpAt = -1, sprint = false) => {

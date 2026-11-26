@@ -4,6 +4,8 @@
  * spatial woodland birdsong, sparse ambient harmonics, and soft SFX.
  */
 
+import { BIOMES } from './biomes';
+
 export interface AudioEnv {
   altitude: number;
   waterProximity: number; // 0 (far from water) .. 1 (at/in water)
@@ -14,9 +16,11 @@ export interface AudioEnv {
   aerial: boolean;        // true during high-altitude vista / resonance camera
   glide: number;          // 0 .. 1 paraglider airspeed (0 when not gliding)
   climbing: boolean;
+  biomeIndex?: number;    // 0..5 current region
+  nightFactor?: number;   // 0..1 night blend
 }
 
-// D major pentatonic frequencies for calm, open-air ambient tones
+// D major pentatonic fallback frequencies for calm, open-air ambient tones
 const PENTA = [293.66, 329.63, 369.99, 440.0, 493.88, 587.33, 659.25, 739.99];
 const BASS = [146.83, 196.0, 220.0];
 
@@ -211,24 +215,29 @@ export class NatureAudio {
     if (!this.ctx || !this.started || this._muted || this.ctx.state !== 'running') return;
     this.t += dt;
     const now = this.ctx.currentTime;
+    const bioIdx = env.biomeIndex ?? 0;
+    const bio = BIOMES[bioIdx] ?? BIOMES[0];
+    const night = env.nightFactor ?? 0;
 
-    // Natural irregular wind gusts
+    // Natural irregular wind gusts modulated by biome character (brisk in Canyon/Snow, calm in Maple/Mistwood)
     const gust = 0.5 + 0.3 * Math.sin(this.t * 0.34) + 0.2 * Math.sin(this.t * 0.13 + 1.7);
     const highFactor = Math.min(1, Math.max(0, (env.altitude - 18) / 42)) + (env.aerial ? 0.55 : 0);
-    const breezeFreq = 250 + gust * 190 + highFactor * 160 + env.speed * 70 + env.glide * 520;
-    const breezeVol = 0.042 + gust * 0.045 + highFactor * 0.04 + env.speed * 0.018 + env.glide * 0.11;
-    this.breezeFilter.frequency.setTargetAtTime(breezeFreq, now, 0.25);
-    this.breezeGain.gain.setTargetAtTime(Math.min(0.26, breezeVol), now, 0.25);
+    const windMod = Math.max(0, 1 + bio.windBoost);
+    const breezeFreq = (250 + gust * 190 + highFactor * 160 + env.speed * 70 + env.glide * 520) * (bioIdx === 5 ? 1.18 : bioIdx === 4 ? 0.82 : 1.0);
+    const breezeVol = (0.042 + gust * 0.045 + highFactor * 0.04 + env.speed * 0.018 + env.glide * 0.11) * windMod;
+    this.breezeFilter.frequency.setTargetAtTime(breezeFreq, now, 0.3);
+    this.breezeGain.gain.setTargetAtTime(Math.min(0.26, breezeVol), now, 0.3);
 
-    // Rustling leaves (strongest in lowland/midland forests, quieter high up or in water)
+    // Rustling leaves (rich in Mistwood & Maple, hushed in Canyon & high Snow)
     const treeZone = env.swimming ? 0.15 : Math.max(0.15, 1 - Math.max(0, (env.altitude - 38) / 28));
-    const rustle = (0.008 + gust * 0.018) * treeZone;
+    const rustle = (0.008 + gust * 0.018) * treeZone * bio.leafFactor;
     this.leavesFilter.frequency.setTargetAtTime(920 + gust * 420, now, 0.3);
     this.leavesGain.gain.setTargetAtTime(rustle, now, 0.3);
 
-    // Gentle shore waves when near lakes / sea
+    // Gentle shore waves when near lakes / sea / karst lagoons
     const wave = 0.5 + 0.5 * Math.sin(this.t * 0.92 + 0.35 * Math.sin(this.t * 0.27));
-    const waterVol = env.waterProximity * (0.018 + wave * 0.045);
+    const waterAmt = Math.min(1, env.waterProximity + bio.waterFactor * 0.35);
+    const waterVol = waterAmt * (0.018 + wave * 0.045);
     this.waterFilter.frequency.setTargetAtTime(310 + wave * 420, now, 0.2);
     this.waterGain.gain.setTargetAtTime(waterVol, now, 0.25);
 
@@ -243,20 +252,20 @@ export class NatureAudio {
       this.stepDist = 0.65;
     }
 
-    // Woodland birdsong
+    // Woodland birdsong (quiet at night except soft mystical dove/owl in Mistwood; rare in Snow)
     this.birdTimer -= dt;
     if (this.birdTimer <= 0) {
-      this.birdTimer = 3.6 + Math.random() * 6.4;
-      if (env.altitude < 56 && !env.aerial) {
-        this.playBird();
+      this.birdTimer = 3.8 + Math.random() * 6.4;
+      if (env.altitude < 56 && !env.aerial && Math.random() < bio.birdFactor * (1 - night * 0.72)) {
+        this.playBird(bioIdx === 4 && night > 0.45);
       }
     }
 
-    // Sparse open-air ambient harmonic notes
+    // Sparse open-air ambient harmonic notes tuned to current biome's musical mode
     this.noteTimer -= dt;
     if (this.noteTimer <= 0) {
-      this.noteTimer = 10 + Math.random() * 10;
-      this.playAmbientPhrase();
+      this.noteTimer = 9.5 + Math.random() * 9.5;
+      this.playAmbientPhrase(bioIdx);
     }
   }
 
@@ -304,7 +313,7 @@ export class NatureAudio {
     }
   }
 
-  private playBird() {
+  private playBird(nocturnal = false) {
     if (!this.ctx) return;
     const ctx = this.ctx;
     const now = ctx.currentTime;
@@ -318,6 +327,14 @@ export class NatureAudio {
     out.connect(dry);
     dry.connect(this.master);
     out.connect(this.reverb);
+
+    if (nocturnal) {
+      // Soft distant woodland owl two-hoot call in Mistwood at night
+      const base = 390 + Math.random() * 60;
+      this.chirp(ctx, out, now, base * 1.04, base, 0.34, 0.018);
+      this.chirp(ctx, out, now + 0.52, base * 0.90, base * 0.85, 0.42, 0.016);
+      return;
+    }
 
     const kind = Math.random();
     if (kind < 0.28) {
@@ -369,22 +386,25 @@ export class NatureAudio {
     osc.stop(start + dur + 0.02);
   }
 
-  /** Breath-of-the-Wild style ultra-sparse felt-bell / wind-harp notes. */
-  private playAmbientPhrase() {
+  /** Breath-of-the-Wild style ultra-sparse felt-bell / wind-harp notes tuned per biome. */
+  private playAmbientPhrase(biomeIndex = 0) {
     if (!this.ctx) return;
     const ctx = this.ctx;
     const now = ctx.currentTime;
+    const bio = BIOMES[biomeIndex] ?? BIOMES[0];
+    const scale = bio.scale.length ? bio.scale : PENTA;
+    const bass = bio.bass.length ? bio.bass : BASS;
     const count = Math.random() < 0.45 ? 1 : 2;
-    let idx = Math.floor(Math.random() * PENTA.length);
+    let idx = Math.floor(Math.random() * scale.length);
 
-    if (Math.random() < 0.35) {
-      const bf = BASS[Math.floor(Math.random() * BASS.length)];
-      this.softTone(ctx, now, bf, 4.2, 0.026);
+    if (Math.random() < 0.38) {
+      const bf = bass[Math.floor(Math.random() * bass.length)];
+      this.softTone(ctx, now, bf, 4.4, 0.026);
     }
     for (let i = 0; i < count; i++) {
       const t = now + i * (0.55 + Math.random() * 0.55);
-      this.softTone(ctx, t, PENTA[idx], 3.6, 0.024);
-      idx = Math.max(0, Math.min(PENTA.length - 1, idx + (Math.random() < 0.5 ? 1 : -2)));
+      this.softTone(ctx, t, scale[idx], 3.8, 0.024);
+      idx = Math.max(0, Math.min(scale.length - 1, idx + (Math.random() < 0.5 ? 1 : -2)));
     }
   }
 
@@ -424,6 +444,42 @@ export class NatureAudio {
     ov.start(start);
     osc.stop(start + dur + 0.05);
     ov.stop(start + dur + 0.05);
+  }
+
+  /** Poetic regional arrival motif when stepping into a biome. */
+  playRegionEnter(biomeIndex: number, isFirst: boolean) {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const bio = BIOMES[biomeIndex] ?? BIOMES[0];
+    const now = ctx.currentTime;
+    if (isFirst && bio.bass.length) {
+      this.softTone(ctx, now, bio.bass[0], 4.2, 0.036);
+    }
+    bio.arrivalMotif.forEach((f, i) => {
+      this.softTone(ctx, now + i * 0.24, f, 3.2, isFirst ? 0.030 : 0.020);
+    });
+  }
+
+  /** Luminous discovery chord when spotting one of the six regional Wonders. */
+  playWonderDiscover() {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    [369.99, 440.0, 587.33, 880.0].forEach((f, i) => {
+      this.softTone(ctx, now + i * 0.14, f, 3.4, 0.032);
+    });
+    this.bell(1174.66, 0.42, 0.026, 2.2);
+  }
+
+  /** Serene shimmering harmonic wash when silently capturing a Temporal Vista (時景). */
+  playMomentCapture() {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    [293.66, 440.0, 554.37, 659.25, 880.0].forEach((f, i) => {
+      this.softTone(ctx, now + i * 0.18, f, 4.4, 0.028);
+    });
+    this.bell(1318.5, 0.55, 0.022, 2.6);
   }
 
   /** Soft crystalline wind-chime when spotting an ancient shrine up close. */
