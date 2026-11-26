@@ -408,7 +408,7 @@ export class NatureAudio {
     osc.stop(start + dur + 0.02);
   }
 
-  /** Breath-of-the-Wild style ultra-sparse felt-bell / wind-harp notes tuned per biome. */
+  /** Ultra-sparse felt-bell / wind-harp notes tuned per biome. */
   private playAmbientPhrase(biomeIndex = 0) {
     if (!this.ctx) return;
     const ctx = this.ctx;

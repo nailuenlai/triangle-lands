@@ -3,11 +3,11 @@ import { HALF, SEG, WATER_LEVEL, WORLD_SIZE, type Terrain } from './terrain';
 import { BIOMES, BIOME_COUNT } from './biomes';
 
 /**
- * Breath of the Wild–inspired watercolor / anime cel-shading palette & uniforms.
+ * Watercolor / anime cel-shading palette & uniforms.
  * Supports a full smooth day/night cycle (Dawn -> Day -> Sunset -> Twilight -> Moonlit Night)
  * plus seamless per-biome atmosphere blending (fog range, mist tint, light/shadow hue).
  */
-export const BOTW_PALETTE = {
+export const CEL_PALETTE = {
   skyZenith: new THREE.Color('#2d82d6'),
   skyMid: new THREE.Color('#74bdeb'),
   skyHorizon: new THREE.Color('#d7eeef'),
@@ -23,8 +23,8 @@ export const BOTW_PALETTE = {
   active: new THREE.Color('#4be5ff'),
 };
 
-const DAY_SHADOW_BASE = BOTW_PALETTE.shadowTint.clone();
-const DAY_RIM_BASE = BOTW_PALETTE.rimColor.clone();
+const DAY_SHADOW_BASE = CEL_PALETTE.shadowTint.clone();
+const DAY_RIM_BASE = CEL_PALETTE.rimColor.clone();
 
 export const celUniforms = {
   uTime: { value: 0 },
@@ -32,28 +32,28 @@ export const celUniforms = {
   uMoonDir: { value: new THREE.Vector3(-0.48, -0.58, -0.36).normalize() },
   uNightFactor: { value: 0.0 },
   uSunsetFactor: { value: 0.0 },
-  uSkyZenith: { value: BOTW_PALETTE.skyZenith.clone() },
-  uSkyMid: { value: BOTW_PALETTE.skyMid.clone() },
-  uSkyHorizon: { value: BOTW_PALETTE.skyHorizon.clone() },
-  uSunHaze: { value: BOTW_PALETTE.sunHaze.clone() },
-  uAerialBlue: { value: BOTW_PALETTE.aerialBlue.clone() },
-  uValleyMist: { value: BOTW_PALETTE.valleyMist.clone() },
+  uSkyZenith: { value: CEL_PALETTE.skyZenith.clone() },
+  uSkyMid: { value: CEL_PALETTE.skyMid.clone() },
+  uSkyHorizon: { value: CEL_PALETTE.skyHorizon.clone() },
+  uSunHaze: { value: CEL_PALETTE.sunHaze.clone() },
+  uAerialBlue: { value: CEL_PALETTE.aerialBlue.clone() },
+  uValleyMist: { value: CEL_PALETTE.valleyMist.clone() },
   uValleyMistBoost: { value: 0.22 },
-  uShadowTint: { value: BOTW_PALETTE.shadowTint.clone() },
+  uShadowTint: { value: CEL_PALETTE.shadowTint.clone() },
   uShadowMod: { value: new THREE.Vector3(1, 1, 1) },
-  uLitTint: { value: BOTW_PALETTE.litTint.clone() },
+  uLitTint: { value: CEL_PALETTE.litTint.clone() },
   uRimMod: { value: new THREE.Vector3(1, 1, 1) },
-  uCloudTop: { value: BOTW_PALETTE.cloudTop.clone() },
-  uCloudBottom: { value: BOTW_PALETTE.cloudBottom.clone() },
+  uCloudTop: { value: CEL_PALETTE.cloudTop.clone() },
+  uCloudBottom: { value: CEL_PALETTE.cloudBottom.clone() },
   uFogNear: { value: 105.0 },
   uFogFar: { value: 560.0 },
 };
 
 // Base day/night colors before regional biome tinting (prevents drift when both update each frame)
-const _baseAerialBlue = BOTW_PALETTE.aerialBlue.clone();
-const _baseValleyMist = BOTW_PALETTE.valleyMist.clone();
-const _baseShadowTint = BOTW_PALETTE.shadowTint.clone();
-const _baseLitTint = BOTW_PALETTE.litTint.clone();
+const _baseAerialBlue = CEL_PALETTE.aerialBlue.clone();
+const _baseValleyMist = CEL_PALETTE.valleyMist.clone();
+const _baseShadowTint = CEL_PALETTE.shadowTint.clone();
+const _baseLitTint = CEL_PALETTE.litTint.clone();
 
 // Smoothed biome atmosphere state
 const _bioFogTint = new THREE.Color('#8ec3e8');
@@ -230,7 +230,7 @@ const SKY_KEYS: SkyKeyframe[] = [
   // 0.25 Rosy watercolor dawn (朝霞)
   mkKey(0.25, '#3b6bc0', '#d496ad', '#ffdcb5', '#ffe1b3', '#b3a3cb', '#f2d3c4',
     '#4f639e', '#ffe4c2', '#ffebd0', '#ffe4c9', '#7771a1', '#ffd6c4', '#5c5358', 1.25, 0.12, 0.85),
-  // 0.36 Bright Hyrule morning-day (晴晝 — primary BotW look)
+  // 0.36 Bright sunlit morning-day (晴晝 — primary daytime look)
   mkKey(0.36, '#2d82d6', '#74bdeb', '#d7eeef', '#fff1cc', '#8ec3e8', '#e2f2f1',
     '#4f6fa3', '#fff9eb', '#fff9e6', '#fcfaf2', '#779ec9', '#d6eeff', '#7b6d4a', 1.4, 0.0, 0.0),
   // 0.62 Warm sunny afternoon
@@ -280,7 +280,7 @@ const _state: DayNightState = {
 };
 
 /**
- * Updates all shared BotW cel-shading, sky, cloud, water, and fog uniforms for a given
+ * Updates all shared cel-shading, sky, cloud, water, and fog uniforms for a given
  * normalized time of day in [0, 1) (0 = midnight, 0.25 = dawn, 0.5 = noon, 0.75 = sunset).
  */
 export function updateDayNight(timeOfDay: number): DayNightState {
@@ -421,7 +421,7 @@ uniform float uValleyMistBoost;
 uniform float uFogNear;
 uniform float uFogFar;
 
-vec3 applyBotwAtmosphere(vec3 col, vec3 worldPos) {
+vec3 applyCelAtmosphere(vec3 col, vec3 worldPos) {
   vec3 toFrag = worldPos - cameraPosition;
   float dist = length(toFrag);
   vec3 viewDir = toFrag / max(dist, 0.0001);
@@ -475,7 +475,7 @@ export interface CelMaterialOptions {
 }
 
 /**
- * Creates a Breath of the Wild watercolor-cel material built on MeshLambertMaterial
+ * Creates a watercolor-cel material built on MeshLambertMaterial
  * so Three.js handles real-time shadow maps, InstancedMesh transforms/colors,
  * transparency fades, and depth sorting natively.
  */
@@ -491,8 +491,8 @@ export function createCelMaterial(opts: CelMaterialOptions = {}): THREE.MeshLamb
     fog: false,
   });
 
-  const shadowTint = opts.shadowTint ? new THREE.Color(opts.shadowTint) : BOTW_PALETTE.shadowTint.clone();
-  const rimColor = opts.rimColor ? new THREE.Color(opts.rimColor) : BOTW_PALETTE.rimColor.clone();
+  const shadowTint = opts.shadowTint ? new THREE.Color(opts.shadowTint) : CEL_PALETTE.shadowTint.clone();
+  const rimColor = opts.rimColor ? new THREE.Color(opts.rimColor) : CEL_PALETTE.rimColor.clone();
   const rimStrength = opts.rimStrength ?? 0.38;
   const rimPower = opts.rimPower ?? 2.7;
   const stepLow = opts.stepLow ?? -0.02;
@@ -674,7 +674,7 @@ export function createCelMaterial(opts: CelMaterialOptions = {}): THREE.MeshLamb
           vec3 litCol = uLitTint * (1.02 + celHi);
           vec3 shade = mix(shadowCol, litCol, lit);
 
-          // Delicate BotW atmospheric rim light (warm gold at sunset, cool silver under moonlight)
+          // Delicate atmospheric rim light (warm gold at sunset, cool silver under moonlight)
           float ndotv = saturate(dot(geometryNormal, geometryViewDir));
           float rimGate = mix(0.22, 1.0, smoothstep(-0.20, 0.50, rawNdotL)) * mix(0.38, 1.0, castSh * cloudVal);
           float rim = safePow(1.0 - ndotv, uRimPower) * uRimStrength * rimGate;
@@ -706,7 +706,7 @@ export function createCelMaterial(opts: CelMaterialOptions = {}): THREE.MeshLamb
       .replace(
         '#include <opaque_fragment>',
         /* glsl */ `
-        outgoingLight = applyBotwAtmosphere(outgoingLight, vCelWorldPos);
+        outgoingLight = applyCelAtmosphere(outgoingLight, vCelWorldPos);
         #include <opaque_fragment>
         `,
       );
@@ -755,7 +755,7 @@ export function getBiomeTextures(terrain: Terrain): { texA: THREE.DataTexture; t
   return pair;
 }
 
-// ------------------------------------------------------------ Painterly BotW Multi-Biome Terrain Material
+// ------------------------------------------------------------ Painterly Multi-Biome Terrain Material
 
 export function createTerrainMaterial(terrain: Terrain): THREE.MeshLambertMaterial {
   const { texA, texB } = getBiomeTextures(terrain);
@@ -764,7 +764,7 @@ export function createTerrainMaterial(terrain: Terrain): THREE.MeshLambertMateri
     flatShading: false,
     fog: false,
   });
-  mat.customProgramCacheKey = () => 'botw_terrain_biome_v4';
+  mat.customProgramCacheKey = () => 'cel_terrain_biome_v4';
 
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = celUniforms.uTime;
@@ -866,7 +866,7 @@ export function createTerrainMaterial(terrain: Terrain): THREE.MeshLambertMateri
           float brush  = (nMed - 0.5) * 0.11 + (nFine - 0.5) * 0.04;
 
           // --- Ground palettes per biome (linear color space for vivid watercolor richness) ---
-          // 0: Meadow (BotW sunlit emerald + golden pasture)
+          // 0: Meadow (sunlit emerald + golden pasture)
           vec3 gMeadow = mix(vec3(0.088, 0.315, 0.062), vec3(0.205, 0.485, 0.068), smoothstep(0.30, 0.72, nLarge));
           gMeadow = mix(gMeadow, vec3(0.320, 0.455, 0.082), smoothstep(0.56, 0.84, nMed) * 0.40);
 
@@ -1015,7 +1015,7 @@ export function createTerrainMaterial(terrain: Terrain): THREE.MeshLambertMateri
         '#include <opaque_fragment>',
         /* glsl */ `
         outgoingLight += vec3(0.20, 0.82, 0.72) * gMistGlow * 0.55;
-        outgoingLight = applyBotwAtmosphere(outgoingLight, vCelWorldPos);
+        outgoingLight = applyCelAtmosphere(outgoingLight, vCelWorldPos);
         #include <opaque_fragment>
         `,
       );
@@ -1024,7 +1024,7 @@ export function createTerrainMaterial(terrain: Terrain): THREE.MeshLambertMateri
   return mat;
 }
 
-// ------------------------------------------------------------ Stylized BotW Water (Biome-Aware)
+// ------------------------------------------------------------ Stylized Cel Water (Biome-Aware)
 
 function buildShoreDepthTexture(terrain: Terrain): THREE.DataTexture {
   const N = SEG + 1;
@@ -1197,7 +1197,7 @@ export function createWaterMaterial(terrain: Terrain): THREE.ShaderMaterial {
         alpha = max(alpha, foam * 0.97);
         alpha = mix(alpha, 1.0, smoothstep(90.0, 220.0, dist));
 
-        waterCol = applyBotwAtmosphere(waterCol, vWorldPos);
+        waterCol = applyCelAtmosphere(waterCol, vWorldPos);
 
         gl_FragColor = vec4(waterCol, alpha);
         #include <tonemapping_fragment>
@@ -1327,7 +1327,7 @@ export function createSubtleOutlineMaterial(thickness = 0.02, color = '#2a334a')
       void main() {
         float alpha = 0.48 * smoothstep(38.0, 12.0, vDist);
         if (alpha < 0.02) discard;
-        vec3 col = applyBotwAtmosphere(uColor, vWorldPos);
+        vec3 col = applyCelAtmosphere(uColor, vWorldPos);
         gl_FragColor = vec4(col, alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -1422,7 +1422,7 @@ export function createGrassMaterial(isFlower = false): THREE.ShaderMaterial {
         vec3 shade = mix(uShadowTint * 1.10, uLitTint * 1.02, mix(cloudVal, 0.85, uNightFactor));
         col *= shade;
 
-        col = applyBotwAtmosphere(col, vWorldPos);
+        col = applyCelAtmosphere(col, vWorldPos);
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -1628,7 +1628,7 @@ export function createGlowMushroomMaterial(): THREE.ShaderMaterial {
         float glowBoost = mix(0.22, 1.85, smoothstep(0.15, 0.85, uNightFactor)) * capMask * pulse;
         vec3 col = litCol + vInstColor * glowBoost;
 
-        col = applyBotwAtmosphere(col, vWorldPos);
+        col = applyCelAtmosphere(col, vWorldPos);
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
