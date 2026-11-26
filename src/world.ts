@@ -1,12 +1,16 @@
 import * as THREE from 'three';
 import { Terrain, SEG, HALF, WATER_LEVEL, WORLD_SIZE, smoothstep } from './terrain';
 import { mulberry32, Simplex2 } from './noise';
+import { BIOMES, sampleBiomeWeights, sampleDominantBiome } from './biomes';
 import {
   BOTW_PALETTE,
   CEL_SAFE_MATH_GLSL,
   celUniforms,
+  createAuroraMaterial,
   createCelMaterial,
   createCloudMaterial,
+  createCloudSeaMaterial,
+  createGlowMushroomMaterial,
   createGrassMaterial,
   createTerrainMaterial,
   createWaterMaterial,
@@ -179,6 +183,110 @@ function buildWildflowerGeo(): THREE.BufferGeometry {
   return geo;
 }
 
+/** Towering wide umbrella canopy for Mistwood's ancient giant trees. */
+function buildAncientCanopyGeo(): THREE.BufferGeometry {
+  const puffs: THREE.BufferGeometry[] = [];
+  const specs: [number, number, number, number, number][] = [
+    [0, 6.2, 0, 2.75, 1.35],
+    [1.85, 5.45, 0.85, 1.75, 1.05],
+    [-1.75, 5.55, 0.72, 1.82, 1.08],
+    [0.25, 5.4, -1.85, 1.78, 1.02],
+    [-0.95, 6.75, -0.55, 1.55, 1.0],
+    [0.95, 6.65, 0.45, 1.5, 0.95],
+  ];
+  for (const [x, y, z, rx, ry] of specs) {
+    const g = new THREE.SphereGeometry(1, 7, 5);
+    g.scale(rx, ry, rx);
+    g.translate(x, y, z);
+    puffs.push(g);
+  }
+  const geo = mergeGeometries(puffs);
+  applyRadialFoliageNormals(geo, 5.7, 0.72, 0.85);
+  return geo;
+}
+
+/** Flared buttress trunk for Mistwood giant trees. */
+function buildAncientTrunkGeo(): THREE.BufferGeometry {
+  const main = new THREE.CylinderGeometry(0.45, 0.92, 5.8, 7);
+  main.translate(0, 2.9, 0);
+  const rootA = new THREE.CylinderGeometry(0.18, 0.42, 2.1, 5);
+  rootA.rotateZ(0.45);
+  rootA.translate(0.68, 0.75, 0.25);
+  const rootB = new THREE.CylinderGeometry(0.18, 0.40, 2.0, 5);
+  rootB.rotateZ(-0.42);
+  rootB.rotateY(2.1);
+  rootB.translate(-0.52, 0.72, -0.45);
+  const rootC = new THREE.CylinderGeometry(0.16, 0.38, 1.9, 5);
+  rootC.rotateX(0.42);
+  rootC.translate(0.1, 0.68, 0.65);
+  return mergeGeometries([main, rootA, rootB, rootC]);
+}
+
+/** Cluster of 3 stylized glowing mushrooms for Mistwood forest floor. */
+function buildMushroomClusterGeo(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const specs: [number, number, number, number][] = [
+    // [ox, oz, height, capRadius]
+    [0.0, 0.0, 0.92, 0.44],
+    [0.42, 0.24, 0.62, 0.30],
+    [-0.36, 0.22, 0.50, 0.24],
+  ];
+  for (const [ox, oz, h, r] of specs) {
+    const stem = new THREE.CylinderGeometry(r * 0.22, r * 0.32, h * 0.62, 6);
+    stem.translate(ox, h * 0.31, oz);
+    const cap = new THREE.ConeGeometry(r, h * 0.45, 7);
+    cap.translate(ox, h * 0.78, oz);
+    parts.push(stem, cap);
+  }
+  return mergeGeometries(parts);
+}
+
+/** Stylized floating lily pad cluster with a tiny central blossom for South Maple Lake. */
+function buildWaterLilyGeo(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const pads: [number, number, number, number][] = [
+    [0, 0, 0.68, 0.2],
+    [0.82, 0.42, 0.50, 1.8],
+    [-0.68, 0.52, 0.46, 3.6],
+  ];
+  for (const [ox, oz, r, rot] of pads) {
+    const pad = new THREE.CylinderGeometry(r, r * 0.95, 0.05, 8, 1, false, 0, Math.PI * 1.82);
+    pad.rotateY(rot);
+    pad.translate(ox, 0.03, oz);
+    parts.push(pad);
+  }
+  return mergeGeometries(parts);
+}
+
+/** Lakeside reed / cattail tuft for South Maple Lake & Karst shallows. */
+function buildReedGeo(): THREE.BufferGeometry {
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const stalks: [number, number, number, number, number][] = [
+    [0.0, 0.0, 0.0, 0.07, 1.65],
+    [0.24, 0.14, 1.1, 0.065, 1.45],
+    [-0.22, 0.18, 2.4, 0.065, 1.55],
+    [0.10, -0.24, 3.9, 0.06, 1.32],
+    [-0.18, -0.15, 5.1, 0.065, 1.48],
+  ];
+  for (const [ox, oz, yaw, w, h] of stalks) {
+    const cx = Math.cos(yaw), sz = Math.sin(yaw);
+    const rx = cx * w, rz = sz * w;
+    const fx = -sz * 0.22, fz = cx * 0.22;
+    positions.push(
+      ox - rx, 0, oz - rz,
+      ox + rx, 0, oz + rz,
+      ox + fx, h, oz + fz,
+    );
+    uvs.push(0, 0, 1, 0, 0.5, 1.0);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.computeVertexNormals();
+  return geo;
+}
+
 // ---------------------------------------------------------------- Sky
 export function createSky(sunDir: THREE.Vector3): THREE.Mesh {
   celUniforms.uSunDir.value.copy(sunDir).normalize();
@@ -330,7 +438,7 @@ export function createTerrainMesh(terrain: Terrain): THREE.Mesh {
   geo.setIndex(new THREE.BufferAttribute(indices, 1));
   geo.computeVertexNormals();
 
-  const mesh = new THREE.Mesh(geo, createTerrainMaterial());
+  const mesh = new THREE.Mesh(geo, createTerrainMaterial(terrain));
   mesh.receiveShadow = true;
   return mesh;
 }
@@ -344,7 +452,7 @@ export function createWater(terrain: Terrain): THREE.Mesh {
   return m;
 }
 
-// ---------------------------------------------------------------- Vegetation
+// ---------------------------------------------------------------- Biome-Aware Vegetation
 export function createVegetation(terrain: Terrain, avoid: { x: number; z: number; r: number }[]): THREE.Group {
   const group = new THREE.Group();
   const rand = mulberry32(11);
@@ -354,7 +462,12 @@ export function createVegetation(terrain: Terrain, avoid: { x: number; z: number
   const roundGeo = buildBroadleafCanopyGeo();
   const trunkGeo = new THREE.CylinderGeometry(0.18, 0.34, 2.0, 7);
   trunkGeo.translate(0, 1.0, 0);
+  const ancientCanopyGeo = buildAncientCanopyGeo();
+  const ancientTrunkGeo = buildAncientTrunkGeo();
   const rockGeo = new THREE.DodecahedronGeometry(1, 0);
+  const mushroomGeo = buildMushroomClusterGeo();
+  const lilyGeo = buildWaterLilyGeo();
+  const reedGeo = buildReedGeo();
 
   const pineMat = createCelMaterial({
     shadowTint: '#3f6496',
@@ -376,26 +489,64 @@ export function createVegetation(terrain: Terrain, avoid: { x: number; z: number
     wind: { amp: 0.16, freq: 1.7, heightOffset: 1.6 },
     cacheKey: 'cel_broadleaf_v2',
   });
+  const ancientCanopyMat = createCelMaterial({
+    shadowTint: '#244d5c',
+    rimStrength: 0.36,
+    rimPower: 2.5,
+    stepLow: -0.05,
+    stepHigh: 0.18,
+    highlight: 0.14,
+    wind: { amp: 0.14, freq: 1.1, heightOffset: 3.5 },
+    cacheKey: 'cel_ancient_canopy_v1',
+  });
   const trunkMat = createCelMaterial({
     color: '#73533a',
     shadowTint: '#4e5d85',
     rimStrength: 0.18,
     cacheKey: 'cel_trunk_v2',
   });
+  const ancientTrunkMat = createCelMaterial({
+    color: '#4b4036',
+    shadowTint: '#2b4752',
+    rimStrength: 0.22,
+    mossTop: 0.42,
+    cacheKey: 'cel_ancient_trunk_v1',
+  });
+  // White base so per-instance biome colors render accurately
   const rockMat = createCelMaterial({
-    color: '#9c9385',
+    color: '#ffffff',
     flatShading: true,
     shadowTint: '#526b96',
     rimStrength: 0.28,
-    mossTop: 0.56,
-    cacheKey: 'cel_rock_v2',
+    mossTop: 0.28,
+    cacheKey: 'cel_rock_biome_v3',
   });
+  const mushroomMat = createGlowMushroomMaterial();
+  const lilyMat = createCelMaterial({
+    color: '#ffffff',
+    shadowTint: '#325d6b',
+    rimStrength: 0.24,
+    cacheKey: 'cel_lily_v1',
+  });
+  const reedMat = createGrassMaterial(false);
 
-  const MAX = 1400;
-  const pines = new THREE.InstancedMesh(pineGeo, pineMat, MAX);
-  const rounds = new THREE.InstancedMesh(roundGeo, roundMat, MAX);
-  const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, MAX * 2);
-  const rocks = new THREE.InstancedMesh(rockGeo, rockMat, 260);
+  const MAX_PINE = 1100;
+  const MAX_ROUND = 1200;
+  const MAX_ANCIENT = 240;
+  const MAX_ROCK = 340;
+  const MAX_MUSHROOM = 260;
+  const MAX_LILY = 220;
+  const MAX_REED = 360;
+
+  const pines = new THREE.InstancedMesh(pineGeo, pineMat, MAX_PINE);
+  const rounds = new THREE.InstancedMesh(roundGeo, roundMat, MAX_ROUND);
+  const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, MAX_PINE + MAX_ROUND);
+  const ancientCanopies = new THREE.InstancedMesh(ancientCanopyGeo, ancientCanopyMat, MAX_ANCIENT);
+  const ancientTrunks = new THREE.InstancedMesh(ancientTrunkGeo, ancientTrunkMat, MAX_ANCIENT);
+  const rocks = new THREE.InstancedMesh(rockGeo, rockMat, MAX_ROCK);
+  const mushrooms = new THREE.InstancedMesh(mushroomGeo, mushroomMat, MAX_MUSHROOM);
+  const lilies = new THREE.InstancedMesh(lilyGeo, lilyMat, MAX_LILY);
+  const reeds = new THREE.InstancedMesh(reedGeo, reedMat, MAX_REED);
 
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
@@ -403,38 +554,162 @@ export function createVegetation(terrain: Terrain, avoid: { x: number; z: number
   const v = new THREE.Vector3();
   const up = new THREE.Vector3(0, 1, 0);
   const c = new THREE.Color();
-  let np = 0, nr = 0, nt = 0, nk = 0;
+  const bw = new Float32Array(6);
+
+  let np = 0, nr = 0, nt = 0, na = 0, nk = 0, nm = 0, nl = 0, nrd = 0;
 
   const blocked = (x: number, z: number) => avoid.some((a) => Math.hypot(x - a.x, z - a.z) < a.r);
 
-  for (let k = 0; k < 9000 && (np < MAX || nr < MAX); k++) {
+  // 1. Trees (biome-tailored species, density, scale, and palette)
+  for (let k = 0; k < 12500 && (np < MAX_PINE || nr < MAX_ROUND || na < MAX_ANCIENT); k++) {
     const x = (rand() - 0.5) * WORLD_SIZE * 0.92;
     const z = (rand() - 0.5) * WORLD_SIZE * 0.92;
     const h = terrain.height(x, z);
-    if (h < WATER_LEVEL + 1.6 || h > 58) continue;
-    if (terrain.flatness(x, z) < 0.86) continue;
-    if (forest.noise(x * 0.012, z * 0.012) < 0.05 + rand() * 0.25) continue;
+    if (h < WATER_LEVEL + 1.4 || h > 64) continue;
+    const flat = terrain.flatness(x, z);
+    if (flat < 0.83) continue;
     if (blocked(x, z)) continue;
 
+    const { index: bio } = sampleDominantBiome(x, z);
+    const fn = forest.noise(x * 0.012, z * 0.012);
+
+    // 4: 霧林 — Dense colossal ancient trees
+    if (bio === 4) {
+      if (fn < -0.22 + rand() * 0.25) continue;
+      if (na < MAX_ANCIENT && rand() < 0.68) {
+        const sc = 1.45 + rand() * 1.15;
+        q.setFromAxisAngle(up, rand() * Math.PI * 2);
+        s.set(sc, sc * (0.95 + rand() * 0.35), sc);
+        v.set(x, h - 0.35, z);
+        m.compose(v, q, s);
+        ancientCanopies.setMatrixAt(na, m);
+        ancientTrunks.setMatrixAt(na, m);
+        // Deep emerald-teal & misty blue-green giant canopy
+        c.setHSL(0.41 + rand() * 0.08, 0.44 + rand() * 0.14, 0.16 + rand() * 0.08);
+        ancientCanopies.setColorAt(na++, c);
+        continue;
+      }
+      // Understory deep-teal pines
+      if (np < MAX_PINE && rand() < 0.45) {
+        const sc = 0.85 + rand() * 0.65;
+        q.setFromAxisAngle(up, rand() * Math.PI * 2);
+        s.set(sc, sc * (0.9 + rand() * 0.35), sc);
+        v.set(x, h - 0.22, z);
+        m.compose(v, q, s);
+        pines.setMatrixAt(np, m);
+        c.setHSL(0.43 + rand() * 0.07, 0.46, 0.17 + rand() * 0.07);
+        pines.setColorAt(np++, c);
+        trunks.setMatrixAt(nt++, m);
+      }
+      continue;
+    }
+
+    // 2: 東崖赤谷 — Very sparse dry desert scrub / stunted warm-ochre trees
+    if (bio === 2) {
+      if (rand() > 0.14 || fn < 0.18 || h > 44) continue;
+      if (nr < MAX_ROUND) {
+        const sc = 0.48 + rand() * 0.42;
+        q.setFromAxisAngle(up, rand() * Math.PI * 2);
+        s.set(sc * 1.2, sc * 0.68, sc * 1.2);
+        v.set(x, h - 0.3, z);
+        m.compose(v, q, s);
+        rounds.setMatrixAt(nr, m);
+        c.setHSL(0.14 + rand() * 0.07, 0.38, 0.28 + rand() * 0.08); // dry sage-ochre scrub
+        rounds.setColorAt(nr++, c);
+        trunks.setMatrixAt(nt++, m);
+      }
+      continue;
+    }
+
+    // 5: 北境雪原 — Frosted alpine pines on lower/mid slopes
+    if (bio === 5) {
+      if (h > 54 || fn < -0.05 + rand() * 0.32) continue;
+      if (np < MAX_PINE) {
+        const sc = 0.78 + rand() * 0.72;
+        q.setFromAxisAngle(up, rand() * Math.PI * 2);
+        s.set(sc, sc * (0.95 + rand() * 0.38), sc);
+        v.set(x, h - 0.22, z);
+        m.compose(v, q, s);
+        pines.setMatrixAt(np, m);
+        // Frosted silver-blue & snowy pine needles
+        if (rand() < 0.42) {
+          c.setHSL(0.54 + rand() * 0.04, 0.28, 0.56 + rand() * 0.14); // snow-laden boughs
+        } else {
+          c.setHSL(0.50 + rand() * 0.06, 0.38, 0.24 + rand() * 0.09); // deep frost spruce
+        }
+        pines.setColorAt(np++, c);
+        trunks.setMatrixAt(nt++, m);
+      }
+      continue;
+    }
+
+    // 3: 南湖楓渚 — Vivid crimson, scarlet, vermilion, and golden-amber autumn maples!
+    if (bio === 3) {
+      if (fn < -0.22 + rand() * 0.24 || h > 42) continue;
+      if (nr < MAX_ROUND) {
+        const sc = 0.82 + rand() * 0.70;
+        q.setFromAxisAngle(up, rand() * Math.PI * 2);
+        s.set(sc * 1.08, sc * (0.88 + rand() * 0.32), sc * 1.08);
+        v.set(x, h - 0.22, z);
+        m.compose(v, q, s);
+        rounds.setMatrixAt(nr, m);
+        const pal = rand();
+        if (pal < 0.48) {
+          c.setHSL(0.005 + rand() * 0.03, 0.84, 0.34 + rand() * 0.08); // vivid crimson maple
+        } else if (pal < 0.80) {
+          c.setHSL(0.05 + rand() * 0.03, 0.86, 0.42 + rand() * 0.08); // glowing vermilion maple
+        } else if (pal < 0.94) {
+          c.setHSL(0.11 + rand() * 0.03, 0.82, 0.48 + rand() * 0.07); // golden ginkgo/maple
+        } else {
+          c.setHSL(0.24 + rand() * 0.05, 0.48, 0.28 + rand() * 0.06); // olive contrast
+        }
+        rounds.setColorAt(nr++, c);
+        trunks.setMatrixAt(nt++, m);
+      }
+      continue;
+    }
+
+    // 1: 西嶺石林 — Jade-green karst pines & graceful emerald tufts along banks & pillar crowns
+    if (bio === 1) {
+      if (fn < -0.04 + rand() * 0.28) continue;
+      const sc = 0.66 + rand() * 0.58;
+      q.setFromAxisAngle(up, rand() * Math.PI * 2);
+      s.set(sc, sc * (0.9 + rand() * 0.34), sc);
+      v.set(x, h - 0.22, z);
+      m.compose(v, q, s);
+      if ((h > 20 || rand() < 0.55) && np < MAX_PINE) {
+        pines.setMatrixAt(np, m);
+        c.setHSL(0.39 + rand() * 0.06, 0.50, 0.21 + rand() * 0.08); // jade mountain pine
+        pines.setColorAt(np++, c);
+        trunks.setMatrixAt(nt++, m);
+      } else if (nr < MAX_ROUND) {
+        rounds.setMatrixAt(nr, m);
+        c.setHSL(0.35 + rand() * 0.07, 0.52, 0.28 + rand() * 0.09); // jade broadleaf
+        rounds.setColorAt(nr++, c);
+        trunks.setMatrixAt(nt++, m);
+      }
+      continue;
+    }
+
+    // 0: 翠野 — Classic sunlit Hyrule meadow trees
+    if (fn < 0.04 + rand() * 0.25 || h > 54) continue;
     const sc = 0.72 + rand() * 0.68;
     q.setFromAxisAngle(up, rand() * Math.PI * 2);
     s.set(sc, sc * (0.86 + rand() * 0.36), sc);
     v.set(x, h - 0.22, z);
     m.compose(v, q, s);
-    const usePine = h > 26 || rand() < 0.35;
-    if (usePine && np < MAX) {
+    const usePine = h > 26 || rand() < 0.34;
+    if (usePine && np < MAX_PINE) {
       pines.setMatrixAt(np, m);
-      // Rich emerald alpine pine palette
       c.setHSL(0.34 + rand() * 0.06, 0.52, 0.22 + rand() * 0.08);
       pines.setColorAt(np++, c);
-    } else if (!usePine && nr < MAX) {
+    } else if (!usePine && nr < MAX_ROUND) {
       rounds.setMatrixAt(nr, m);
-      // Vivid BotW sunlit canopy greens + occasional warm golden & blossom accents
       const accent = rand();
       if (accent < 0.09) {
-        c.setHSL(0.11 + rand() * 0.04, 0.68, 0.44 + rand() * 0.06); // sunlit golden-amber tree
-      } else if (accent < 0.13) {
-        c.setHSL(0.95 + rand() * 0.04, 0.52, 0.68 + rand() * 0.05); // soft sakura blossom accent
+        c.setHSL(0.11 + rand() * 0.04, 0.68, 0.44 + rand() * 0.06);
+      } else if (accent < 0.14) {
+        c.setHSL(0.95 + rand() * 0.04, 0.52, 0.68 + rand() * 0.05);
       } else {
         c.setHSL(0.24 + rand() * 0.08, 0.60, 0.30 + rand() * 0.10);
       }
@@ -443,24 +718,136 @@ export function createVegetation(terrain: Terrain, avoid: { x: number; z: number
     trunks.setMatrixAt(nt++, m);
   }
 
-  for (let k = 0; k < 4000 && nk < 260; k++) {
+  // 2. Biome-tinted Boulders & Outcrops
+  for (let k = 0; k < 5500 && nk < MAX_ROCK; k++) {
     const x = (rand() - 0.5) * WORLD_SIZE * 0.9;
     const z = (rand() - 0.5) * WORLD_SIZE * 0.9;
     const h = terrain.height(x, z);
     if (h < WATER_LEVEL || blocked(x, z)) continue;
+    const { index: bio } = sampleDominantBiome(x, z);
     const f = terrain.flatness(x, z);
-    if (f > 0.9 && rand() < 0.8) continue;
-    const sc = 0.6 + rand() * 2.2;
+    if (bio !== 2 && f > 0.9 && rand() < 0.78) continue;
+    if (bio === 2 && f > 0.94 && rand() < 0.45) continue;
+
+    const sc = (bio === 2 ? 0.8 : 0.6) + rand() * (bio === 2 ? 2.6 : 2.1);
     q.setFromEuler(new THREE.Euler(rand() * 3, rand() * 3, rand() * 3));
-    s.set(sc * (0.8 + rand() * 0.6), sc * (0.5 + rand() * 0.5), sc * (0.8 + rand() * 0.6));
-    v.set(x, h, z);
+    s.set(sc * (0.8 + rand() * 0.6), sc * (0.5 + rand() * 0.55), sc * (0.8 + rand() * 0.6));
+    v.set(x, h - 0.15, z);
     m.compose(v, q, s);
-    rocks.setMatrixAt(nk++, m);
+    rocks.setMatrixAt(nk, m);
+    if (bio === 1) c.setHSL(0.45, 0.12, 0.58 + rand() * 0.14);      // pale jade limestone
+    else if (bio === 2) c.setHSL(0.045 + rand() * 0.03, 0.56, 0.38 + rand() * 0.12); // red sandstone
+    else if (bio === 3) c.setHSL(0.08, 0.22, 0.44 + rand() * 0.10); // warm mossy autumn stone
+    else if (bio === 4) c.setHSL(0.48, 0.18, 0.28 + rand() * 0.08); // damp slate
+    else if (bio === 5) c.setHSL(0.58, 0.20, 0.50 + rand() * 0.14); // glacial granite
+    else c.setHSL(0.10, 0.12, 0.52 + rand() * 0.10);                // meadow stone
+    rocks.setColorAt(nk++, c);
   }
 
-  pines.count = np; rounds.count = nr; trunks.count = nt; rocks.count = nk;
-  [pines, rounds, trunks, rocks].forEach((im) => {
+  // 3. Mistwood Bioluminescent Glowing Mushrooms
+  for (let k = 0; k < 4200 && nm < MAX_MUSHROOM; k++) {
+    const x = -128 + (rand() - 0.5) * 210;
+    const z = 155 + (rand() - 0.5) * 210;
+    if (Math.hypot(x, z) > HALF - 26) continue;
+    sampleBiomeWeights(x, z, bw);
+    if (bw[4] < 0.42) continue;
+    const h = terrain.height(x, z);
+    if (h < WATER_LEVEL + 1.8 || terrain.flatness(x, z) < 0.80 || blocked(x, z)) continue;
+
+    const sc = 0.65 + rand() * 0.95;
+    q.setFromAxisAngle(up, rand() * Math.PI * 2);
+    s.set(sc, sc * (0.85 + rand() * 0.45), sc);
+    v.set(x, h - 0.06, z);
+    m.compose(v, q, s);
+    mushrooms.setMatrixAt(nm, m);
+    if (rand() < 0.68) {
+      c.setRGB(0.24 + rand() * 0.14, 0.90 + rand() * 0.10, 0.82 + rand() * 0.12); // cyan-jade glow
+    } else {
+      c.setRGB(0.62 + rand() * 0.16, 0.52 + rand() * 0.14, 0.96); // soft lavender-violet glow
+    }
+    mushrooms.setColorAt(nm++, c);
+  }
+
+  // 4. South Maple Lake Water Lilies (floating on calm lake shallows)
+  for (let k = 0; k < 3500 && nl < MAX_LILY; k++) {
+    const x = 98 + (rand() - 0.5) * 165;
+    const z = 138 + (rand() - 0.5) * 165;
+    if (Math.hypot(x, z) > HALF - 34) continue;
+    sampleBiomeWeights(x, z, bw);
+    if (bw[3] < 0.35) continue;
+    const h = terrain.height(x, z);
+    // Shallow-to-mid calm lake water
+    if (h > WATER_LEVEL - 0.25 || h < WATER_LEVEL - 4.2) continue;
+
+    const sc = 0.72 + rand() * 0.68;
+    q.setFromAxisAngle(up, rand() * Math.PI * 2);
+    s.set(sc, 1, sc);
+    v.set(x, WATER_LEVEL + 0.03, z);
+    m.compose(v, q, s);
+    lilies.setMatrixAt(nl, m);
+    if (rand() < 0.18) {
+      c.setHSL(0.95 + rand() * 0.04, 0.65, 0.76); // occasional pale pink lotus pad accent
+    } else {
+      c.setHSL(0.32 + rand() * 0.07, 0.50, 0.24 + rand() * 0.08);
+    }
+    lilies.setColorAt(nl++, c);
+  }
+
+  // 5. Lakeside Reeds (South Maple Lake & West Karst lagoon shallows)
+  for (let k = 0; k < 7000 && nrd < MAX_REED; k++) {
+    const pickMaple = rand() < 0.68;
+    const x = pickMaple ? 98 + (rand() - 0.5) * 185 : -172 + (rand() - 0.5) * 175;
+    const z = pickMaple ? 138 + (rand() - 0.5) * 185 : -48 + (rand() - 0.5) * 175;
+    if (Math.hypot(x, z) > HALF - 26) continue;
+    sampleBiomeWeights(x, z, bw);
+    if (bw[3] < 0.3 && bw[1] < 0.3) continue;
+    const h = terrain.height(x, z);
+    if (h < WATER_LEVEL - 0.35 || h > WATER_LEVEL + 0.95 || blocked(x, z)) continue;
+
+    const sc = 0.8 + rand() * 0.7;
+    q.setFromAxisAngle(up, rand() * Math.PI * 2);
+    s.set(sc, sc * (0.85 + rand() * 0.45), sc);
+    v.set(x, h - 0.08, z);
+    m.compose(v, q, s);
+    reeds.setMatrixAt(nrd, m);
+    if (bw[3] >= bw[1]) {
+      c.setHSL(0.14 + rand() * 0.07, 0.50, 0.36 + rand() * 0.09); // golden autumn reeds
+    } else {
+      c.setHSL(0.35 + rand() * 0.06, 0.48, 0.28 + rand() * 0.08); // jade lagoon reeds
+    }
+    reeds.setColorAt(nrd++, c);
+  }
+
+  pines.count = np;
+  rounds.count = nr;
+  trunks.count = nt;
+  ancientCanopies.count = na;
+  ancientTrunks.count = na;
+  rocks.count = nk;
+  mushrooms.count = nm;
+  lilies.count = nl;
+  reeds.count = nrd;
+
+  [pines, rounds, ancientCanopies].forEach((im) => {
     im.castShadow = true;
+    im.receiveShadow = false;
+    im.instanceMatrix.needsUpdate = true;
+    if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    im.computeBoundingSphere();
+    group.add(im);
+  });
+
+  [trunks, ancientTrunks, rocks].forEach((im) => {
+    im.castShadow = true;
+    im.receiveShadow = true;
+    im.instanceMatrix.needsUpdate = true;
+    if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    im.computeBoundingSphere();
+    group.add(im);
+  });
+
+  [mushrooms, lilies, reeds].forEach((im) => {
+    im.castShadow = false;
     im.receiveShadow = true;
     im.instanceMatrix.needsUpdate = true;
     if (im.instanceColor) im.instanceColor.needsUpdate = true;
@@ -471,7 +858,7 @@ export function createVegetation(terrain: Terrain, avoid: { x: number; z: number
   return group;
 }
 
-// ---------------------------------------------------------------- Dynamic BotW Grass & Wildflowers
+// ---------------------------------------------------------------- Dynamic BotW Biome Grass & Wildflowers
 function cellHash(ix: number, iz: number, salt: number): number {
   let h = Math.imul(ix, 374761393) + Math.imul(iz, 668265263) + Math.imul(salt, 1442695041);
   h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -479,9 +866,8 @@ function cellHash(ix: number, iz: number, salt: number): number {
 }
 
 /**
- * World-anchored toroidal meadow patch following the viewer (~75m x 75m dense grass
- * carpet + clustered watercolor wildflowers). Each world grid cell hashes deterministically
- * so blades stay planted on the ground while only newly entered border cells update.
+ * World-anchored toroidal meadow patch following the viewer (~72m x 72m dense grass
+ * carpet + clustered watercolor wildflowers). Adapts density, height, and color per biome.
  */
 export class DynamicGrassField {
   readonly group = new THREE.Group();
@@ -505,14 +891,25 @@ export class DynamicGrassField {
   private lastFx = 1e9;
   private lastFz = 1e9;
 
-  private readonly flowerPalette = [
-    new THREE.Color('#fffdf0'), // creamy daisy
-    new THREE.Color('#ffe054'), // sunlit buttercup
-    new THREE.Color('#86d2ff'), // sky forget-me-not
-    new THREE.Color('#ffaa90'), // warm peach blossom
+  private readonly flowerPalettes: THREE.Color[][] = [
+    // 0: 翠野
+    [new THREE.Color('#fffdf0'), new THREE.Color('#ffe054'), new THREE.Color('#86d2ff'), new THREE.Color('#ffaa90')],
+    // 1: 西嶺石林
+    [new THREE.Color('#f2fffb'), new THREE.Color('#9ff2da'), new THREE.Color('#fff2b2')],
+    // 2: 東崖赤谷
+    [new THREE.Color('#ffaa4a'), new THREE.Color('#e85f3a'), new THREE.Color('#ffd478')],
+    // 3: 南湖楓渚
+    [new THREE.Color('#e8462c'), new THREE.Color('#f79633'), new THREE.Color('#ffd35c'), new THREE.Color('#fff4d6')],
+    // 4: 霧林
+    [new THREE.Color('#5ef2df'), new THREE.Color('#a48cff'), new THREE.Color('#c8fff4')],
+    // 5: 北境雪原
+    [new THREE.Color('#e2f3ff'), new THREE.Color('#a4d4ff')],
   ];
 
-  constructor(private readonly terrain: Terrain) {
+  constructor(
+    private readonly terrain: Terrain,
+    private readonly extraAvoid: { x: number; z: number; r: number }[] = [],
+  ) {
     const gMat = createGrassMaterial(false);
     const fMat = createGrassMaterial(true);
     this.grass = new THREE.InstancedMesh(buildGrassTuftGeo(), gMat, DynamicGrassField.GRID ** 2);
@@ -522,11 +919,16 @@ export class DynamicGrassField {
     this.group.add(this.grass, this.flowers);
   }
 
-  private shrineKeepOut(x: number, z: number): boolean {
+  private keepOut(x: number, z: number): boolean {
     for (let i = 0; i < TOWER_DEFS.length; i++) {
       const t = TOWER_DEFS[i];
       const dx = x - t.x, dz = z - t.z;
       if (dx * dx + dz * dz < 6.5 * 6.5) return true;
+    }
+    for (let i = 0; i < this.extraAvoid.length; i++) {
+      const a = this.extraAvoid[i];
+      const dx = x - a.x, dz = z - a.z;
+      if (dx * dx + dz * dz < a.r * a.r) return true;
     }
     return false;
   }
@@ -544,9 +946,20 @@ export class DynamicGrassField {
 
     const rOk = Math.abs(x) < HALF - 8 && Math.abs(z) < HALF - 8;
     const h = rOk ? this.terrain.height(x, z) : -99;
-    const flat = rOk && h > WATER_LEVEL + 1.9 && h < 44 ? this.terrain.flatness(x, z) : 0;
+    const { index: bio } = rOk ? sampleDominantBiome(x, z) : { index: 0 };
+
+    const maxH = bio === 5 ? 21 : bio === 2 ? 42 : 46;
+    const flat = rOk && h > WATER_LEVEL + 1.8 && h < maxH ? this.terrain.flatness(x, z) : 0;
     const patch = flat > 0.78 ? this.meadow.noise(x * 0.022, z * 0.022) * 0.5 + 0.5 : 0;
-    const keep = flat > 0.78 && !this.shrineKeepOut(x, z) && (patch > 0.22 || cellHash(gx, gz, 3) < 0.35);
+    const r3 = cellHash(gx, gz, 3);
+
+    let keep = flat > 0.78 && !this.keepOut(x, z);
+    if (keep) {
+      if (bio === 2) keep = r3 < 0.22 && patch > 0.35;           // sparse desert tussocks
+      else if (bio === 5) keep = r3 < 0.25 && h < 19;            // sparse frosty grass below snowline
+      else if (bio === 4) keep = patch > 0.16 || r3 < 0.55;      // lush deep mistwood ferns
+      else keep = patch > 0.22 || r3 < 0.35;
+    }
 
     if (!keep) {
       this.m.makeScale(0, 0, 0);
@@ -554,19 +967,36 @@ export class DynamicGrassField {
       return;
     }
 
-    const sc = 0.78 + cellHash(gx, gz, 4) * 0.65;
-    const sy = sc * (0.72 + patch * 0.45 + cellHash(gx, gz, 5) * 0.28);
+    const sc = (bio === 4 ? 0.95 : bio === 2 ? 0.65 : 0.78) + cellHash(gx, gz, 4) * 0.65;
+    const sy = sc * ((bio === 4 ? 0.95 : 0.72) + patch * 0.45 + cellHash(gx, gz, 5) * 0.28);
     this.q.setFromAxisAngle(this.up, cellHash(gx, gz, 6) * Math.PI * 2);
     this.s.set(sc, sy, sc);
     this.v.set(x, h - 0.05, z);
     this.m.compose(this.v, this.q, this.s);
     this.grass.setMatrixAt(idx, this.m);
 
-    // Rich sunlit Hyrule meadow green harmonized with terrain
-    const hue = 0.245 + patch * 0.045 + (cellHash(gx, gz, 7) - 0.5) * 0.025;
-    const sat = 0.64 + cellHash(gx, gz, 8) * 0.12;
-    const lit = 0.32 + patch * 0.08 + cellHash(gx, gz, 9) * 0.05;
-    this.c.setHSL(hue, sat, lit);
+    const h7 = cellHash(gx, gz, 7);
+    const h8 = cellHash(gx, gz, 8);
+    const h9 = cellHash(gx, gz, 9);
+    if (bio === 1) {
+      // Jade karst grass
+      this.c.setHSL(0.36 + patch * 0.05 + (h7 - 0.5) * 0.025, 0.56 + h8 * 0.12, 0.28 + patch * 0.07 + h9 * 0.05);
+    } else if (bio === 2) {
+      // Dry golden-ochre canyon grass
+      this.c.setHSL(0.11 + (h7 - 0.5) * 0.03, 0.52 + h8 * 0.14, 0.38 + patch * 0.08 + h9 * 0.05);
+    } else if (bio === 3) {
+      // Warm autumn olive-gold grass with occasional rust tint
+      this.c.setHSL(0.16 + patch * 0.06 + (h7 - 0.5) * 0.04, 0.56 + h8 * 0.14, 0.32 + patch * 0.07 + h9 * 0.05);
+    } else if (bio === 4) {
+      // Deep emerald-teal mistwood ferns
+      this.c.setHSL(0.41 + patch * 0.05 + (h7 - 0.5) * 0.03, 0.52 + h8 * 0.12, 0.20 + patch * 0.06 + h9 * 0.04);
+    } else if (bio === 5) {
+      // Frosted pale alpine tufts
+      this.c.setHSL(0.50 + (h7 - 0.5) * 0.04, 0.24 + h8 * 0.10, 0.50 + h9 * 0.10);
+    } else {
+      // Classic sunlit Hyrule meadow green
+      this.c.setHSL(0.245 + patch * 0.045 + (h7 - 0.5) * 0.025, 0.64 + h8 * 0.12, 0.32 + patch * 0.08 + h9 * 0.05);
+    }
     this.grass.setColorAt(idx, this.c);
   }
 
@@ -583,9 +1013,13 @@ export class DynamicGrassField {
 
     const rOk = Math.abs(x) < HALF - 10 && Math.abs(z) < HALF - 10;
     const h = rOk ? this.terrain.height(x, z) : -99;
-    const flat = rOk && h > WATER_LEVEL + 2.2 && h < 42 ? this.terrain.flatness(x, z) : 0;
+    const { index: bio } = rOk ? sampleDominantBiome(x, z) : { index: 0 };
+
+    const maxH = bio === 5 ? 18 : 42;
+    const flat = rOk && h > WATER_LEVEL + 2.0 && h < maxH ? this.terrain.flatness(x, z) : 0;
     const patch = flat > 0.80 ? this.meadow.noise(x * 0.025, z * 0.025) * 0.5 + 0.5 : 0;
-    const keep = flat > 0.80 && patch > 0.46 && cellHash(fx, fz, 13) < 0.42 && !this.shrineKeepOut(x, z);
+    const chance = bio === 2 ? 0.16 : bio === 5 ? 0.10 : bio === 3 ? 0.55 : 0.42;
+    const keep = flat > 0.80 && patch > 0.42 && cellHash(fx, fz, 13) < chance && !this.keepOut(x, z);
 
     if (!keep) {
       this.m.makeScale(0, 0, 0);
@@ -599,8 +1033,9 @@ export class DynamicGrassField {
     this.v.set(x, h - 0.02, z);
     this.m.compose(this.v, this.q, this.s);
     this.flowers.setMatrixAt(idx, this.m);
-    const colIdx = Math.floor(cellHash(fx, fz, 16) * this.flowerPalette.length);
-    this.flowers.setColorAt(idx, this.flowerPalette[colIdx]);
+    const pal = this.flowerPalettes[bio] ?? this.flowerPalettes[0];
+    const colIdx = Math.floor(cellHash(fx, fz, 16) * pal.length);
+    this.flowers.setColorAt(idx, pal[colIdx]);
   }
 
   update(focus: THREE.Vector3) {
@@ -680,6 +1115,193 @@ export function createClouds(): THREE.Group {
     g.add(cloud);
   }
   return g;
+}
+
+// ---------------------------------------------------------------- Northern Night Aurora
+export function createAurora(): THREE.Group {
+  const group = new THREE.Group();
+  const mat = createAuroraMaterial();
+
+  const buildRibbon = (width: number, height: number, curveZ: number, y: number, z: number, rotY = 0) => {
+    const geo = new THREE.PlaneGeometry(width, height, 42, 4);
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const u = x / (width * 0.5); // -1..1
+      // Graceful sweeping S-arc over the northern horizon
+      const bend = Math.sin(u * Math.PI * 0.9) * curveZ + (1 - u * u) * 38;
+      pos.setZ(i, bend);
+    }
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(-12, y, z);
+    mesh.rotation.y = rotY;
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 2;
+    return mesh;
+  };
+
+  group.add(
+    buildRibbon(620, 95, 42, 165, -370, 0.08),
+    buildRibbon(500, 75, -36, 198, -325, -0.14),
+  );
+  return group;
+}
+
+// ---------------------------------------------------------------- West Karst Cloud Sea
+export function createKarstCloudSea(): THREE.Group {
+  const group = new THREE.Group();
+  const mat = createCloudSeaMaterial();
+
+  const layers = [
+    { x: -170, y: 12.5, z: -48, r: 235 },
+    { x: -162, y: 20.5, z: -42, r: 195 },
+  ];
+  for (const l of layers) {
+    const geo = new THREE.PlaneGeometry(l.r, l.r, 1, 1);
+    geo.rotateX(-Math.PI / 2);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(l.x, l.y, l.z);
+    mesh.renderOrder = 3;
+    group.add(mesh);
+  }
+  return group;
+}
+
+// ---------------------------------------------------------------- Soaring Bird Flocks (1 draw call)
+interface FlockBird {
+  cx: number;
+  cz: number;
+  radius: number;
+  baseY: number;
+  speed: number;
+  phase: number;
+  offsetX: number;
+  offsetY: number;
+  offsetZ: number;
+  scale: number;
+}
+
+export class BirdFlocks {
+  readonly mesh: THREE.InstancedMesh;
+  private readonly birds: FlockBird[] = [];
+  private readonly m = new THREE.Matrix4();
+  private readonly q = new THREE.Quaternion();
+  private readonly s = new THREE.Vector3();
+  private readonly p = new THREE.Vector3();
+  private readonly euler = new THREE.Euler();
+
+  constructor() {
+    const rand = mulberry32(733);
+    // Stylized low-poly V-wing silhouette (2 triangular wings + slender body)
+    const positions = new Float32Array([
+      // Left wing
+      0, 0, 0.25,  -1.0, 0.08, -0.12,  0, 0, -0.32,
+      // Right wing
+      0, 0, 0.25,  0, 0, -0.32,  1.0, 0.08, -0.12,
+    ]);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.computeVertexNormals();
+
+    const mat = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      fog: false,
+      uniforms: {
+        uTime: celUniforms.uTime,
+        uLitTint: celUniforms.uLitTint,
+        uNightFactor: celUniforms.uNightFactor,
+      },
+      vertexShader: /* glsl */ `
+        uniform float uTime;
+        varying vec3 vColor;
+        void main() {
+          #ifdef USE_INSTANCING_COLOR
+            vColor = instanceColor;
+          #else
+            vColor = vec3(0.95, 0.94, 0.90);
+          #endif
+          vec3 pos = position;
+          float phase = instanceMatrix[3].x * 0.17 + instanceMatrix[3].z * 0.13;
+          float wing = abs(pos.x);
+          pos.y += sin(uTime * 7.2 + phase) * 0.42 * wing;
+          vec4 wp = modelMatrix * instanceMatrix * vec4(pos, 1.0);
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform vec3 uLitTint;
+        uniform float uNightFactor;
+        varying vec3 vColor;
+        void main() {
+          vec3 col = vColor * mix(uLitTint * 0.95, vec3(0.45, 0.58, 0.78), uNightFactor * 0.75);
+          gl_FragColor = vec4(col, 1.0);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+        }
+      `,
+    });
+
+    const flockSpecs = [
+      { bio: 0, count: 6, r: 62, y: 56, col: '#f7f4ea' }, // Meadow swallows/doves
+      { bio: 1, count: 6, r: 58, y: 66, col: '#f2fcf8' }, // Karst white cranes
+      { bio: 2, count: 5, r: 68, y: 68, col: '#6e4934' }, // Canyon hawks
+      { bio: 3, count: 6, r: 54, y: 42, col: '#fff7ee' }, // Maple lake herons
+      { bio: 4, count: 5, r: 52, y: 60, col: '#a8d8cf' }, // Mistwood birds
+      { bio: 5, count: 4, r: 66, y: 88, col: '#dceeff' }, // Alpine snow eagles
+    ];
+
+    const total = flockSpecs.reduce((a, b) => a + b.count, 0);
+    this.mesh = new THREE.InstancedMesh(geo, mat, total);
+    this.mesh.frustumCulled = false;
+
+    const c = new THREE.Color();
+    let idx = 0;
+    for (const f of flockSpecs) {
+      const b = BIOMES[f.bio];
+      const flockPhase = rand() * Math.PI * 2;
+      const dir = rand() < 0.5 ? 1 : -1;
+      const spd = (0.12 + rand() * 0.05) * dir;
+      c.set(f.col);
+      for (let i = 0; i < f.count; i++) {
+        this.birds.push({
+          cx: b.cx,
+          cz: b.cz,
+          radius: f.r + (rand() - 0.5) * 14,
+          baseY: f.y + (rand() - 0.5) * 8,
+          speed: spd,
+          phase: flockPhase + i * 0.09,
+          offsetX: (rand() - 0.5) * 7,
+          offsetY: (rand() - 0.5) * 3,
+          offsetZ: (rand() - 0.5) * 7,
+          scale: 0.95 + rand() * 0.45,
+        });
+        this.mesh.setColorAt(idx++, c);
+      }
+    }
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+  }
+
+  update(t: number) {
+    for (let i = 0; i < this.birds.length; i++) {
+      const b = this.birds[i];
+      const ang = b.phase + t * b.speed;
+      const x = b.cx + Math.cos(ang) * b.radius + b.offsetX;
+      const z = b.cz + Math.sin(ang) * b.radius + b.offsetZ;
+      const y = b.baseY + b.offsetY + Math.sin(t * 0.7 + b.phase) * 2.2;
+      // Tangent heading along orbit
+      const vx = -Math.sin(ang) * b.speed;
+      const vz = Math.cos(ang) * b.speed;
+      const yaw = Math.atan2(vx, vz);
+      this.p.set(x, y, z);
+      this.euler.set(0, yaw, b.speed > 0 ? 0.16 : -0.16);
+      this.q.setFromEuler(this.euler);
+      this.s.setScalar(b.scale);
+      this.m.compose(this.p, this.q, this.s);
+      this.mesh.setMatrixAt(i, this.m);
+    }
+    this.mesh.instanceMatrix.needsUpdate = true;
+  }
 }
 
 // ---------------------------------------------------------------- Ancient Resonance Shrines

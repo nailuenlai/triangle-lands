@@ -1,6 +1,8 @@
 import { Terrain, HALF, WORLD_SIZE, WATER_LEVEL } from './terrain';
 import { mulberry32, Simplex2 } from './noise';
 import { EXPLORE_RADIUS, type Tower } from './world';
+import { BIOMES, BIOME_COUNT, sampleBiomeWeights } from './biomes';
+import type { Wonder } from './landmarks';
 
 const RES = 512;
 const FOG_RES = 256;
@@ -75,29 +77,99 @@ export class GameMap {
     const ctx = this.terrainImg.getContext('2d')!;
     const img = ctx.createImageData(RES, RES);
     const s = WORLD_SIZE / RES;
-    const deep: RGB = [74, 128, 150], shallow: RGB = [136, 184, 196];
-    const sand: RGB = [226, 210, 160], grassLo: RGB = [150, 178, 104], grassHi: RGB = [118, 146, 88];
-    const rock: RGB = [158, 146, 128], snow: RGB = [246, 244, 238];
+
+    const deepSea: RGB = [72, 124, 148], shallowSea: RGB = [132, 182, 194];
+    const karstLagoon: RGB = [98, 178, 162], mapleLake: RGB = [96, 158, 158], snowSea: RGB = [138, 186, 206];
+    const sandBase: RGB = [226, 208, 158];
+    const snowCol: RGB = [245, 247, 250];
+
+    // Per-biome parchment low-ground, high-ground, and cliff/rock RGB palettes
+    const bioLo: RGB[] = [
+      [152, 180, 104], // 0: 翠野
+      [118, 170, 138], // 1: 西嶺石林
+      [208, 138, 86],  // 2: 東崖赤谷
+      [196, 132, 78],  // 3: 南湖楓渚 (warm autumn maple shores)
+      [76, 126, 108],  // 4: 霧林
+      [214, 224, 232], // 5: 北境雪原
+    ];
+    const bioHi: RGB[] = [
+      [120, 148, 88],  // 0: 翠野
+      [96, 146, 122],  // 1: 西嶺石林
+      [184, 96, 62],   // 2: 東崖赤谷
+      [168, 136, 76],  // 3: 南湖楓渚
+      [58, 102, 92],   // 4: 霧林
+      [240, 245, 250], // 5: 北境雪原
+    ];
+    const bioRock: RGB[] = [
+      [158, 146, 128], // 0: 翠野
+      [166, 178, 170], // 1: 西嶺石林 (pale limestone)
+      [172, 84, 54],   // 2: 東崖赤谷 (red sandstone)
+      [152, 124, 98],  // 3: 南湖楓渚
+      [88, 106, 104],  // 4: 霧林
+      [142, 160, 180], // 5: 北境雪原
+    ];
+
+    const bw = new Float32Array(BIOME_COUNT);
+
     for (let py = 0; py < RES; py++) {
       for (let px = 0; px < RES; px++) {
-        const x = -HALF + (px + 0.5) * s, z = -HALF + (py + 0.5) * s;
+        const x = -HALF + (px + 0.5) * s;
+        const z = -HALF + (py + 0.5) * s;
         const h = terrain.height(x, z);
+        sampleBiomeWeights(x, z, bw);
+
         let c: RGB;
         if (h < WATER_LEVEL) {
-          c = lerp3(shallow, deep, Math.min(1, (WATER_LEVEL - h) / 12));
+          const tDeep = Math.min(1, (WATER_LEVEL - h) / 11);
+          const inIsland = Math.max(0, Math.min(1, (290 - Math.hypot(x, z)) / 90));
+          let shallow = shallowSea;
+          if (inIsland > 0.01) {
+            shallow = lerp3(shallow, karstLagoon, bw[1] * inIsland * 0.85);
+            shallow = lerp3(shallow, mapleLake, bw[3] * inIsland * 0.82);
+            shallow = lerp3(shallow, snowSea, bw[5] * inIsland * 0.65);
+          }
+          c = lerp3(shallow, deepSea, tDeep);
         } else {
-          if (h < WATER_LEVEL + 1.5) c = sand;
-          else if (h < 30) c = lerp3(grassLo, grassHi, (h - WATER_LEVEL) / 30);
-          else if (h < 62) c = lerp3(grassHi, rock, (h - 30) / 32);
-          else c = lerp3(rock, snow, Math.min(1, (h - 62) / 12));
+          let lr = 0, lg = 0, lb = 0;
+          let hr = 0, hg = 0, hb = 0;
+          let rr = 0, rg = 0, rb = 0;
+          for (let b = 0; b < BIOME_COUNT; b++) {
+            const w = bw[b];
+            if (w <= 0.001) continue;
+            lr += bioLo[b][0] * w; lg += bioLo[b][1] * w; lb += bioLo[b][2] * w;
+            hr += bioHi[b][0] * w; hg += bioHi[b][1] * w; hb += bioHi[b][2] * w;
+            rr += bioRock[b][0] * w; rg += bioRock[b][1] * w; rb += bioRock[b][2] * w;
+          }
+          const cLo: RGB = [lr, lg, lb];
+          const cHi: RGB = [hr, hg, hb];
+          const cRock: RGB = [rr, rg, rb];
+
           const gx = terrain.height(x + s, z) - h;
           const gz = terrain.height(x, z + s) - h;
-          const shade = Math.max(0.55, Math.min(1.25, 1 + (-gx - gz) * 0.35));
-          const contour = Math.floor(h / 10) !== Math.floor((h + Math.max(Math.abs(gx), Math.abs(gz))) / 10) ? 0.82 : 1;
+          const slope = Math.hypot(gx, gz) / s;
+          const snowLine = 60 - bw[5] * 42;
+
+          if (h < WATER_LEVEL + 1.5 && bw[5] < 0.5) {
+            c = lerp3(sandBase, cLo, bw[4] * 0.6);
+          } else if (h >= snowLine && bw[2] < 0.5) {
+            c = lerp3(cRock, snowCol, Math.min(1, (h - snowLine) / 10));
+          } else if (slope > 0.55) {
+            c = lerp3(cHi, cRock, Math.min(1, (slope - 0.55) / 0.65));
+          } else if (h < 28) {
+            c = lerp3(cLo, cHi, Math.min(1, (h - WATER_LEVEL) / 28));
+          } else {
+            c = lerp3(cHi, cRock, Math.min(1, (h - 28) / 34));
+          }
+
+          const shade = Math.max(0.58, Math.min(1.24, 1 + (-gx - gz) * 0.32));
+          const contour = Math.floor(h / 10) !== Math.floor((h + Math.max(Math.abs(gx), Math.abs(gz))) / 10) ? 0.84 : 1;
           c = [c[0] * shade * contour, c[1] * shade * contour, c[2] * shade * contour];
         }
         const i = (py * RES + px) * 4;
-        img.data[i] = c[0]; img.data[i + 1] = c[1]; img.data[i + 2] = c[2]; img.data[i + 3] = 255;
+        img.data[i] = Math.min(255, Math.max(0, c[0]));
+        img.data[i + 1] = Math.min(255, Math.max(0, c[1]));
+        img.data[i + 2] = Math.min(255, Math.max(0, c[2]));
+        img.data[i + 3] = 255;
       }
     }
     ctx.putImageData(img, 0, 0);
@@ -399,7 +471,13 @@ export class GameMap {
     return [((x + HALF) / WORLD_SIZE) * size, ((z + HALF) / WORLD_SIZE) * size];
   }
 
-  draw(canvas: HTMLCanvasElement, towers: Tower[], time = 0) {
+  draw(
+    canvas: HTMLCanvasElement,
+    towers: Tower[],
+    time = 0,
+    visitedBiomes?: ReadonlySet<number>,
+    wonders: Wonder[] = [],
+  ) {
     if (this.dirty) this.rebuild();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const css = canvas.clientWidth;
@@ -409,7 +487,7 @@ export class GameMap {
     const ctx = canvas.getContext('2d')!;
     ctx.imageSmoothingEnabled = true;
 
-    // 1. Underlying topographic terrain
+    // 1. Underlying topographic parchment terrain (colored by biome)
     ctx.drawImage(this.terrainImg, 0, 0, size, size);
 
     // 2. Layered fog of war over unexplored areas
@@ -457,18 +535,73 @@ export class GameMap {
     // 5. Cartographic border, vignette, and compass rose above the fog
     ctx.drawImage(this.frameOverlay, 0, 0, size, size);
 
-    // 6. Subtle hand-inked region names only for already-resonated shrines (never player GPS)
+    // 6. Subtle resonated shrine triangles
     ctx.save();
-    ctx.textAlign = 'center';
-    ctx.font = `600 ${2.15 * u}px "Noto Serif TC", serif`;
     for (const t of towers) {
       if (!t.activated) continue;
       const [x, y] = this.toMap(t.def.x, t.def.z, size);
-      const regionName = t.def.name.replace(/之碑$/, '');
-      ctx.fillStyle = 'rgba(243, 234, 214, 0.65)';
-      ctx.fillText(regionName, x, y + 0.35 * u);
-      ctx.fillStyle = 'rgba(48, 36, 22, 0.78)';
-      ctx.fillText(regionName, x, y);
+      const r = 1.25 * u;
+      ctx.fillStyle = 'rgba(34, 130, 150, 0.85)';
+      ctx.strokeStyle = 'rgba(243, 234, 214, 0.85)';
+      ctx.lineWidth = Math.max(1, 0.3 * u);
+      ctx.beginPath();
+      ctx.moveTo(x, y - r * 1.15);
+      ctx.lineTo(x + r, y + r * 0.85);
+      ctx.lineTo(x - r, y + r * 0.85);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // 7. Discovered Wonder landmarks (delicate vermilion-ink 4-point star + caption)
+    if (wonders.length) {
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.font = `600 ${1.72 * u}px "Noto Serif TC", serif`;
+      for (const w of wonders) {
+        if (!w.discovered) continue;
+        const [x, y] = this.toMap(w.def.x, w.def.z, size);
+        const r = 1.35 * u;
+        ctx.fillStyle = 'rgba(176, 62, 42, 0.88)';
+        ctx.strokeStyle = 'rgba(248, 240, 222, 0.88)';
+        ctx.lineWidth = Math.max(1, 0.25 * u);
+        ctx.beginPath();
+        ctx.moveTo(x, y - r);
+        ctx.lineTo(x + r * 0.42, y - r * 0.42);
+        ctx.lineTo(x + r, y);
+        ctx.lineTo(x + r * 0.42, y + r * 0.42);
+        ctx.lineTo(x, y + r);
+        ctx.lineTo(x - r * 0.42, y + r * 0.42);
+        ctx.lineTo(x - r, y);
+        ctx.lineTo(x - r * 0.42, y - r * 0.42);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = 'rgba(246, 238, 220, 0.90)';
+        ctx.lineWidth = Math.max(2, 0.65 * u);
+        ctx.strokeText(w.def.name, x, y + 2.85 * u);
+        ctx.fillStyle = 'rgba(138, 40, 24, 0.94)';
+        ctx.fillText(w.def.name, x, y + 2.85 * u);
+      }
+      ctx.restore();
+    }
+
+    // 8. Hand-inked region names ONLY for biomes the player has visited (unvisited stay mysterious)
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.lineJoin = 'round';
+    ctx.font = `700 ${2.45 * u}px "Noto Serif TC", serif`;
+    for (const b of BIOMES) {
+      if (visitedBiomes && !visitedBiomes.has(b.index)) continue;
+      const [x, y] = this.toMap(b.labelX, b.labelZ, size);
+      ctx.strokeStyle = 'rgba(246, 238, 220, 0.88)';
+      ctx.lineWidth = Math.max(2.5, 0.85 * u);
+      ctx.strokeText(b.name, x, y);
+      ctx.fillStyle = 'rgba(42, 31, 18, 0.88)';
+      ctx.fillText(b.name, x, y);
     }
     ctx.restore();
   }

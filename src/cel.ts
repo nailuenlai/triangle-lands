@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import { HALF, SEG, WATER_LEVEL, WORLD_SIZE, type Terrain } from './terrain';
+import { BIOMES, BIOME_COUNT } from './biomes';
 
 /**
  * Breath of the Wild–inspired watercolor / anime cel-shading palette & uniforms.
- * Supports a full smooth day/night cycle (Dawn -> Day -> Sunset -> Twilight -> Moonlit Night).
+ * Supports a full smooth day/night cycle (Dawn -> Day -> Sunset -> Twilight -> Moonlit Night)
+ * plus seamless per-biome atmosphere blending (fog range, mist tint, light/shadow hue).
  */
 export const BOTW_PALETTE = {
   skyZenith: new THREE.Color('#2d82d6'),
@@ -36,6 +38,7 @@ export const celUniforms = {
   uSunHaze: { value: BOTW_PALETTE.sunHaze.clone() },
   uAerialBlue: { value: BOTW_PALETTE.aerialBlue.clone() },
   uValleyMist: { value: BOTW_PALETTE.valleyMist.clone() },
+  uValleyMistBoost: { value: 0.22 },
   uShadowTint: { value: BOTW_PALETTE.shadowTint.clone() },
   uShadowMod: { value: new THREE.Vector3(1, 1, 1) },
   uLitTint: { value: BOTW_PALETTE.litTint.clone() },
@@ -46,8 +49,125 @@ export const celUniforms = {
   uFogFar: { value: 560.0 },
 };
 
+// Base day/night colors before regional biome tinting (prevents drift when both update each frame)
+const _baseAerialBlue = BOTW_PALETTE.aerialBlue.clone();
+const _baseValleyMist = BOTW_PALETTE.valleyMist.clone();
+const _baseShadowTint = BOTW_PALETTE.shadowTint.clone();
+const _baseLitTint = BOTW_PALETTE.litTint.clone();
+
+// Smoothed biome atmosphere state
+const _bioFogTint = new THREE.Color('#8ec3e8');
+const _bioMistTint = new THREE.Color('#e2f2f1');
+const _bioLitTint = new THREE.Color('#fff9eb');
+const _bioShadowTint = new THREE.Color('#4f6fa3');
+let _bioFogAmt = 0;
+let _bioLitAmt = 0;
+let _bioShadowAmt = 0;
+let _bioFogNear = 108;
+let _bioFogFar = 560;
+let _bioMistBoost = 0.22;
+
+const _tFogTint = new THREE.Color();
+const _tMistTint = new THREE.Color();
+const _tLitTint = new THREE.Color();
+const _tShadowTint = new THREE.Color();
+
 export function updateCelTime(t: number) {
   celUniforms.uTime.value = t;
+}
+
+/**
+ * Smoothly blends regional atmosphere (fog distance, mist density, and subtle
+ * light/shadow color tint) according to the player's current biome weights.
+ */
+export function updateBiomeAtmosphere(weights: Float32Array, dt: number, immediate = false) {
+  let targetNear = 0;
+  let targetFar = 0;
+  let targetFogAmt = 0;
+  let targetMistBoost = 0;
+  let targetLitAmt = 0;
+  let targetShadowAmt = 0;
+  _tFogTint.setRGB(0, 0, 0);
+  _tMistTint.setRGB(0, 0, 0);
+  _tLitTint.setRGB(0, 0, 0);
+  _tShadowTint.setRGB(0, 0, 0);
+
+  for (let i = 0; i < BIOME_COUNT; i++) {
+    const w = weights[i];
+    if (w <= 0.0001) continue;
+    const b = BIOMES[i];
+    targetNear += b.fogNear * w;
+    targetFar += b.fogFar * w;
+    targetFogAmt += b.fogTintAmt * w;
+    targetMistBoost += b.valleyMistBoost * w;
+    targetLitAmt += b.litTintAmt * w;
+    targetShadowAmt += b.shadowTintAmt * w;
+    _tFogTint.r += b.fogTint.r * w;
+    _tFogTint.g += b.fogTint.g * w;
+    _tFogTint.b += b.fogTint.b * w;
+    _tMistTint.r += b.valleyMistTint.r * w;
+    _tMistTint.g += b.valleyMistTint.g * w;
+    _tMistTint.b += b.valleyMistTint.b * w;
+    _tLitTint.r += b.litTint.r * w;
+    _tLitTint.g += b.litTint.g * w;
+    _tLitTint.b += b.litTint.b * w;
+    _tShadowTint.r += b.shadowTint.r * w;
+    _tShadowTint.g += b.shadowTint.g * w;
+    _tShadowTint.b += b.shadowTint.b * w;
+  }
+
+  const k = immediate ? 1 : Math.min(1, dt * 1.45);
+  _bioFogNear += (targetNear - _bioFogNear) * k;
+  _bioFogFar += (targetFar - _bioFogFar) * k;
+  _bioFogAmt += (targetFogAmt - _bioFogAmt) * k;
+  _bioMistBoost += (targetMistBoost - _bioMistBoost) * k;
+  _bioLitAmt += (targetLitAmt - _bioLitAmt) * k;
+  _bioShadowAmt += (targetShadowAmt - _bioShadowAmt) * k;
+  _bioFogTint.lerp(_tFogTint, k);
+  _bioMistTint.lerp(_tMistTint, k);
+  _bioLitTint.lerp(_tLitTint, k);
+  _bioShadowTint.lerp(_tShadowTint, k);
+
+  composeAtmosphereUniforms();
+}
+
+function composeAtmosphereUniforms() {
+  const night = celUniforms.uNightFactor.value;
+  const sunset = celUniforms.uSunsetFactor.value;
+  // Soften daylight biome tints at night/sunset so moonlit and golden-hour harmony stays rich
+  const dayWeight = 1 - night * 0.62;
+  const lightWeight = 1 - Math.max(night * 0.68, sunset * 0.45);
+
+  celUniforms.uFogNear.value = _bioFogNear;
+  celUniforms.uFogFar.value = _bioFogFar;
+  celUniforms.uValleyMistBoost.value = _bioMistBoost * (1 - night * 0.25);
+
+  // Night darkens regional fog tint gracefully toward deep twilight-indigo
+  const fogTargetR = _bioFogTint.r * (1 - night * 0.68);
+  const fogTargetG = _bioFogTint.g * (1 - night * 0.60);
+  const fogTargetB = _bioFogTint.b * (1 - night * 0.48);
+  celUniforms.uAerialBlue.value.setRGB(
+    _baseAerialBlue.r + (fogTargetR - _baseAerialBlue.r) * _bioFogAmt,
+    _baseAerialBlue.g + (fogTargetG - _baseAerialBlue.g) * _bioFogAmt,
+    _baseAerialBlue.b + (fogTargetB - _baseAerialBlue.b) * _bioFogAmt,
+  );
+
+  const mistTargetR = _bioMistTint.r * (1 - night * 0.72);
+  const mistTargetG = _bioMistTint.g * (1 - night * 0.62);
+  const mistTargetB = _bioMistTint.b * (1 - night * 0.50);
+  celUniforms.uValleyMist.value.setRGB(
+    _baseValleyMist.r + (mistTargetR - _baseValleyMist.r) * (_bioFogAmt * 0.9 + 0.15),
+    _baseValleyMist.g + (mistTargetG - _baseValleyMist.g) * (_bioFogAmt * 0.9 + 0.15),
+    _baseValleyMist.b + (mistTargetB - _baseValleyMist.b) * (_bioFogAmt * 0.9 + 0.15),
+  );
+
+  celUniforms.uLitTint.value.copy(_baseLitTint).lerp(_bioLitTint, _bioLitAmt * lightWeight);
+  celUniforms.uShadowTint.value.copy(_baseShadowTint).lerp(_bioShadowTint, _bioShadowAmt * dayWeight);
+  celUniforms.uShadowMod.value.set(
+    celUniforms.uShadowTint.value.r / Math.max(DAY_SHADOW_BASE.r, 0.01),
+    celUniforms.uShadowTint.value.g / Math.max(DAY_SHADOW_BASE.g, 0.01),
+    celUniforms.uShadowTint.value.b / Math.max(DAY_SHADOW_BASE.b, 0.01),
+  );
 }
 
 // ------------------------------------------------------------ Day / Night Atmosphere Engine
@@ -187,10 +307,10 @@ export function updateDayNight(timeOfDay: number): DayNightState {
   celUniforms.uSkyMid.value.copy(a.skyMid).lerp(b.skyMid, k);
   celUniforms.uSkyHorizon.value.copy(a.skyHorizon).lerp(b.skyHorizon, k);
   celUniforms.uSunHaze.value.copy(a.sunHaze).lerp(b.sunHaze, k);
-  celUniforms.uAerialBlue.value.copy(a.aerialBlue).lerp(b.aerialBlue, k);
-  celUniforms.uValleyMist.value.copy(a.valleyMist).lerp(b.valleyMist, k);
-  celUniforms.uShadowTint.value.copy(a.shadowTint).lerp(b.shadowTint, k);
-  celUniforms.uLitTint.value.copy(a.litTint).lerp(b.litTint, k);
+  _baseAerialBlue.copy(a.aerialBlue).lerp(b.aerialBlue, k);
+  _baseValleyMist.copy(a.valleyMist).lerp(b.valleyMist, k);
+  _baseShadowTint.copy(a.shadowTint).lerp(b.shadowTint, k);
+  _baseLitTint.copy(a.litTint).lerp(b.litTint, k);
   celUniforms.uCloudTop.value.copy(a.cloudTop).lerp(b.cloudTop, k);
   celUniforms.uCloudBottom.value.copy(a.cloudBottom).lerp(b.cloudBottom, k);
 
@@ -200,16 +320,13 @@ export function updateDayNight(timeOfDay: number): DayNightState {
     _tmpRim.g / Math.max(DAY_RIM_BASE.g, 0.01),
     _tmpRim.b / Math.max(DAY_RIM_BASE.b, 0.01),
   );
-  celUniforms.uShadowMod.value.set(
-    celUniforms.uShadowTint.value.r / Math.max(DAY_SHADOW_BASE.r, 0.01),
-    celUniforms.uShadowTint.value.g / Math.max(DAY_SHADOW_BASE.g, 0.01),
-    celUniforms.uShadowTint.value.b / Math.max(DAY_SHADOW_BASE.b, 0.01),
-  );
 
   const night = a.night + (b.night - a.night) * k;
   const sunset = a.sunset + (b.sunset - a.sunset) * k;
   celUniforms.uNightFactor.value = night;
   celUniforms.uSunsetFactor.value = sunset;
+
+  composeAtmosphereUniforms();
 
   // Orbital sun arc tilted gracefully across the southern/eastern sky (matches original morning angle around t=0.39)
   const theta = (t - 0.25) * Math.PI * 2;
@@ -237,7 +354,7 @@ export function updateDayNight(timeOfDay: number): DayNightState {
   _state.nightFactor = night;
   _state.sunsetFactor = sunset;
   // Soft selective bloom intensifies subtly at sunset & starry night
-  _state.bloomStrength = 0.30 + sunset * 0.10 + night * 0.14;
+  _state.bloomStrength = 0.30 + sunset * 0.10 + night * 0.16;
 
   if (night > 0.55) { _state.phase = 'night'; _state.phaseLabel = '星空'; }
   else if (t >= 0.66 && t < 0.86) { _state.phase = 'sunset'; _state.phaseLabel = '夕陽'; }
@@ -300,6 +417,7 @@ uniform vec3 uSkyHorizon;
 uniform vec3 uSunHaze;
 uniform vec3 uAerialBlue;
 uniform vec3 uValleyMist;
+uniform float uValleyMistBoost;
 uniform float uFogNear;
 uniform float uFogFar;
 
@@ -314,19 +432,19 @@ vec3 applyBotwAtmosphere(vec3 col, vec3 worldPos) {
   float sunScatter = sd2 * sd2;
   float horizonLift = smoothstep(0.28, -0.05, viewDir.y);
 
-  // Aerial perspective: near & mid stay vivid; distant ridges layer into sky-tinted mist
-  vec3 farColor = mix(uAerialBlue, uSkyHorizon, 0.38 + 0.35 * horizonLift);
-  farColor = mix(farColor, uSunHaze, sunScatter * (0.52 - 0.18 * uNightFactor));
+  // Aerial perspective: near & mid stay vivid; distant ridges layer into biome-tinted mist
+  vec3 farColor = mix(uAerialBlue, uSkyHorizon, 0.34 + 0.30 * horizonLift);
+  farColor = mix(farColor, uSunHaze, sunScatter * (0.48 - 0.18 * uNightFactor));
 
   float distFactor = smoothstep(uFogNear, uFogFar, dist);
-  distFactor = safePow(distFactor, 1.18);
+  distFactor = safePow(distFactor, 1.15);
   col = mix(col, farColor, distFactor * 0.88);
 
-  // Delicate valley mountain mist (山嵐) settling in distant lowlands & lakes
-  float lowMask = smoothstep(26.0, 1.5, worldPos.y);
-  float mistDist = smoothstep(75.0, 260.0, dist);
-  float valleyAmt = lowMask * mistDist * 0.22;
-  vec3 mistCol = mix(uValleyMist, uSunHaze, sunScatter * 0.32);
+  // Delicate valley mountain mist (山嵐) settling in lowlands, lagoons, & misty woods
+  float lowMask = smoothstep(28.0, 1.5, worldPos.y);
+  float mistDist = smoothstep(42.0, 210.0, dist);
+  float valleyAmt = clamp(lowMask * mistDist * uValleyMistBoost, 0.0, 0.56);
+  vec3 mistCol = mix(uValleyMist, uSunHaze, sunScatter * 0.28);
   col = mix(col, mistCol, valleyAmt);
 
   return col;
@@ -398,6 +516,7 @@ export function createCelMaterial(opts: CelMaterialOptions = {}): THREE.MeshLamb
     shader.uniforms.uSunHaze = celUniforms.uSunHaze;
     shader.uniforms.uAerialBlue = celUniforms.uAerialBlue;
     shader.uniforms.uValleyMist = celUniforms.uValleyMist;
+    shader.uniforms.uValleyMistBoost = celUniforms.uValleyMistBoost;
     shader.uniforms.uFogNear = celUniforms.uFogNear;
     shader.uniforms.uFogFar = celUniforms.uFogFar;
     shader.uniforms.uLitTint = celUniforms.uLitTint;
@@ -596,15 +715,56 @@ export function createCelMaterial(opts: CelMaterialOptions = {}): THREE.MeshLamb
   return mat;
 }
 
-// ------------------------------------------------------------ Painterly BotW Terrain Material
+// ------------------------------------------------------------ Biome Lookup Textures
 
-export function createTerrainMaterial(): THREE.MeshLambertMaterial {
+const biomeTexCache = new WeakMap<Terrain, { texA: THREE.DataTexture; texB: THREE.DataTexture }>();
+
+export function getBiomeTextures(terrain: Terrain): { texA: THREE.DataTexture; texB: THREE.DataTexture } {
+  const existing = biomeTexCache.get(terrain);
+  if (existing) return existing;
+
+  const N = SEG + 1;
+  const dataA = new Uint8Array(N * N * 4);
+  const dataB = new Uint8Array(N * N * 4);
+  const bw = terrain.biomeWeights;
+
+  for (let i = 0; i < N * N; i++) {
+    const off = i * BIOME_COUNT;
+    const p = i * 4;
+    dataA[p] = Math.round(bw[off] * 255);     // meadow
+    dataA[p + 1] = Math.round(bw[off + 1] * 255); // karst
+    dataA[p + 2] = Math.round(bw[off + 2] * 255); // canyon
+    dataA[p + 3] = Math.round(bw[off + 3] * 255); // maple
+    dataB[p] = Math.round(bw[off + 4] * 255);     // mistwood
+    dataB[p + 1] = Math.round(bw[off + 5] * 255); // snow
+    dataB[p + 2] = 0;
+    dataB[p + 3] = 255;
+  }
+
+  const mk = (buf: Uint8Array) => {
+    const tex = new THREE.DataTexture(buf, N, N, THREE.RGBAFormat);
+    tex.magFilter = THREE.LinearFilter;
+    tex.minFilter = THREE.LinearFilter;
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.needsUpdate = true;
+    return tex;
+  };
+  const pair = { texA: mk(dataA), texB: mk(dataB) };
+  biomeTexCache.set(terrain, pair);
+  return pair;
+}
+
+// ------------------------------------------------------------ Painterly BotW Multi-Biome Terrain Material
+
+export function createTerrainMaterial(terrain: Terrain): THREE.MeshLambertMaterial {
+  const { texA, texB } = getBiomeTextures(terrain);
   const mat = new THREE.MeshLambertMaterial({
     color: '#ffffff',
     flatShading: false,
     fog: false,
   });
-  mat.customProgramCacheKey = () => 'botw_terrain_v3';
+  mat.customProgramCacheKey = () => 'botw_terrain_biome_v4';
 
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = celUniforms.uTime;
@@ -615,11 +775,16 @@ export function createTerrainMaterial(): THREE.MeshLambertMaterial {
     shader.uniforms.uSunHaze = celUniforms.uSunHaze;
     shader.uniforms.uAerialBlue = celUniforms.uAerialBlue;
     shader.uniforms.uValleyMist = celUniforms.uValleyMist;
+    shader.uniforms.uValleyMistBoost = celUniforms.uValleyMistBoost;
     shader.uniforms.uFogNear = celUniforms.uFogNear;
     shader.uniforms.uFogFar = celUniforms.uFogFar;
     shader.uniforms.uLitTint = celUniforms.uLitTint;
     shader.uniforms.uShadowTint = celUniforms.uShadowTint;
     shader.uniforms.uWaterLevel = { value: WATER_LEVEL };
+    shader.uniforms.uWorldHalf = { value: HALF };
+    shader.uniforms.uWorldSize = { value: WORLD_SIZE };
+    shader.uniforms.uBiomeA = { value: texA };
+    shader.uniforms.uBiomeB = { value: texB };
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -649,10 +814,15 @@ export function createTerrainMaterial(): THREE.MeshLambertMaterial {
         #include <common>
         uniform float uTime;
         uniform float uWaterLevel;
+        uniform float uWorldHalf;
+        uniform float uWorldSize;
+        uniform sampler2D uBiomeA;
+        uniform sampler2D uBiomeB;
         uniform vec3 uLitTint;
         uniform vec3 uShadowTint;
         varying vec3 vCelWorldPos;
         varying vec3 vCelWorldNormal;
+        float gMistGlow = 0.0;
         ${CEL_NOISE_GLSL}
         ${CEL_SAFE_MATH_GLSL}
         ${CEL_ATMOS_PARS_GLSL}
@@ -677,45 +847,108 @@ export function createTerrainMaterial(): THREE.MeshLambertMaterial {
           float h = wPos.y;
           float ny = wNrm.y;
 
+          vec2 buv = clamp((wPos.xz + uWorldHalf) / uWorldSize, 0.0, 1.0);
+          vec4 wA = texture2D(uBiomeA, buv);
+          vec4 wB = texture2D(uBiomeB, buv);
+          float wMeadow   = wA.r;
+          float wKarst    = wA.g;
+          float wCanyon   = wA.b;
+          float wMaple    = wA.a;
+          float wMistwood = wB.r;
+          float wSnow     = wB.g;
+          float wSum = max(0.001, wMeadow + wKarst + wCanyon + wMaple + wMistwood + wSnow);
+          wMeadow /= wSum; wKarst /= wSum; wCanyon /= wSum;
+          wMaple /= wSum; wMistwood /= wSum; wSnow /= wSum;
+
           float nLarge = celFbm(wPos.xz * 0.015);
           float nMed   = celNoise(wPos.xz * 0.062);
           float nFine  = celNoise(wPos.xz * 0.22);
           float brush  = (nMed - 0.5) * 0.11 + (nFine - 0.5) * 0.04;
 
-          vec3 grassBright = vec3(0.205, 0.485, 0.068);
-          vec3 grassRich   = vec3(0.088, 0.315, 0.062);
-          vec3 grassGold   = vec3(0.320, 0.455, 0.082);
-          vec3 alpineCol   = vec3(0.265, 0.365, 0.095);
-          vec3 sandDry     = vec3(0.760, 0.630, 0.350);
-          vec3 sandWet     = vec3(0.455, 0.365, 0.200);
-          vec3 rockWarm    = vec3(0.370, 0.325, 0.260);
-          vec3 rockCool    = vec3(0.235, 0.235, 0.245);
-          vec3 snowCol     = vec3(0.860, 0.895, 0.935);
+          // --- Ground palettes per biome (linear color space for vivid watercolor richness) ---
+          // 0: Meadow (BotW sunlit emerald + golden pasture)
+          vec3 gMeadow = mix(vec3(0.088, 0.315, 0.062), vec3(0.205, 0.485, 0.068), smoothstep(0.30, 0.72, nLarge));
+          gMeadow = mix(gMeadow, vec3(0.320, 0.455, 0.082), smoothstep(0.56, 0.84, nMed) * 0.40);
 
-          vec3 grass = mix(grassRich, grassBright, smoothstep(0.30, 0.72, nLarge));
-          grass = mix(grass, grassGold, smoothstep(0.56, 0.84, nMed) * 0.42);
-          grass *= 0.94 + nFine * 0.12;
+          // 1: Karst (lush jade-emerald moss on pillar crowns & turquoise lagoon banks)
+          vec3 gKarst = mix(vec3(0.048, 0.290, 0.145), vec3(0.115, 0.430, 0.215), smoothstep(0.28, 0.74, nLarge));
+          gKarst = mix(gKarst, vec3(0.200, 0.460, 0.275), smoothstep(0.60, 0.86, nMed) * 0.35);
 
-          float alpineMask = smoothstep(38.0, 54.0, h + (nLarge - 0.5) * 7.0);
-          vec3 ground = mix(grass, alpineCol, alpineMask);
+          // 2: Red Canyon (sun-baked ochre terracotta & dry dusty clay)
+          vec3 gCanyon = mix(vec3(0.465, 0.175, 0.062), vec3(0.640, 0.295, 0.105), smoothstep(0.26, 0.74, nLarge));
+          gCanyon = mix(gCanyon, vec3(0.720, 0.445, 0.175), smoothstep(0.58, 0.85, nMed) * 0.48);
 
-          float sandMask = smoothstep(uWaterLevel + 2.9, uWaterLevel + 0.5, h + (nMed - 0.5) * 1.4);
+          // 3: South Maple Lake (autumn olive-gold meadow dappled with fallen crimson & amber leaves)
+          vec3 gMaple = mix(vec3(0.185, 0.295, 0.072), vec3(0.355, 0.340, 0.085), smoothstep(0.28, 0.72, nLarge));
+          float leafPatch = smoothstep(0.54, 0.80, nMed);
+          vec3 leafCol = mix(vec3(0.560, 0.125, 0.048), vec3(0.660, 0.310, 0.060), nFine);
+          gMaple = mix(gMaple, leafCol, leafPatch * 0.56);
+
+          // 4: Mistwood (deep mossy blue-green pine/fern carpet)
+          vec3 gMist = mix(vec3(0.028, 0.145, 0.115), vec3(0.068, 0.245, 0.170), smoothstep(0.26, 0.75, nLarge));
+          gMist = mix(gMist, vec3(0.095, 0.285, 0.205), smoothstep(0.62, 0.86, nMed) * 0.35);
+
+          // 5: Northern Snowfield (frosted alpine tundra transitioning quickly into snow)
+          vec3 gSnow = mix(vec3(0.560, 0.665, 0.755), vec3(0.840, 0.895, 0.945), smoothstep(0.25, 0.72, nLarge));
+
+          vec3 ground = gMeadow * wMeadow + gKarst * wKarst + gCanyon * wCanyon
+                      + gMaple * wMaple + gMist * wMistwood + gSnow * wSnow;
+          ground *= 0.94 + nFine * 0.12;
+
+          // Gentle high-altitude alpine shift in non-canyon / non-snow areas
+          float alpineMask = smoothstep(38.0, 54.0, h + (nLarge - 0.5) * 7.0) * (1.0 - wCanyon - wSnow);
+          ground = mix(ground, vec3(0.265, 0.365, 0.095), alpineMask * 0.65);
+
+          // --- Shoreline / sand palettes per biome ---
+          vec3 sandDry = vec3(0.760, 0.630, 0.350) * (wMeadow + wMaple)
+                       + vec3(0.680, 0.720, 0.640) * wKarst
+                       + vec3(0.740, 0.440, 0.200) * wCanyon
+                       + vec3(0.250, 0.340, 0.310) * wMistwood
+                       + vec3(0.720, 0.800, 0.880) * wSnow;
+          vec3 sandWet = sandDry * 0.58;
+          float sandMask = smoothstep(uWaterLevel + 2.8, uWaterLevel + 0.45, h + (nMed - 0.5) * 1.4);
           float wetMask  = smoothstep(uWaterLevel + 0.80, uWaterLevel - 0.15, h);
           vec3 sand = mix(sandDry, sandWet, wetMask * 0.72);
           ground = mix(ground, sand, sandMask);
 
+          // --- Cliff / Rock palettes per biome ---
           float rockPatch = celFbm(vec2((wPos.x + wPos.z) * 0.032, h * 0.085));
+          float strata = 0.5 + 0.5 * sin(h * 0.95 + rockPatch * 3.4);
           float ledgeHint = smoothstep(0.35, 0.68, celNoise(vec2((wPos.x - wPos.z) * 0.025, h * 0.22 + rockPatch * 2.2)));
-          vec3 rock = mix(rockCool, rockWarm, smoothstep(0.32, 0.68, rockPatch));
+
+          vec3 rMeadow = mix(vec3(0.235, 0.235, 0.245), vec3(0.370, 0.325, 0.260), smoothstep(0.32, 0.68, rockPatch));
+          // Pale weathered jade-limestone with horizontal karst ledges
+          vec3 rKarst  = mix(vec3(0.255, 0.335, 0.320), vec3(0.540, 0.585, 0.545), smoothstep(0.26, 0.74, rockPatch * 0.7 + strata * 0.3));
+          // Vivid stratified red/ochre sandstone canyon walls
+          vec3 rCanyon = mix(vec3(0.365, 0.095, 0.042), vec3(0.655, 0.235, 0.088), smoothstep(0.22, 0.78, strata));
+          rCanyon = mix(rCanyon, vec3(0.760, 0.405, 0.150), smoothstep(0.66, 0.92, strata) * 0.55);
+          vec3 rMaple  = mix(vec3(0.250, 0.215, 0.185), vec3(0.410, 0.320, 0.235), smoothstep(0.30, 0.70, rockPatch));
+          vec3 rMist   = mix(vec3(0.095, 0.155, 0.165), vec3(0.185, 0.260, 0.250), smoothstep(0.30, 0.70, rockPatch));
+          vec3 rSnow   = mix(vec3(0.175, 0.245, 0.345), vec3(0.325, 0.405, 0.505), smoothstep(0.28, 0.72, rockPatch));
+
+          vec3 rock = rMeadow * wMeadow + rKarst * wKarst + rCanyon * wCanyon
+                    + rMaple * wMaple + rMist * wMistwood + rSnow * wSnow;
           rock *= 0.88 + 0.22 * ledgeHint;
 
+          // Canyon & Karst show rock faces slightly earlier on steep slopes for sculptural crispness
+          float slopeThresh = 0.77 + (wCanyon * 0.04 + wKarst * 0.03);
           float slopeVal = ny + brush * 0.45;
-          float rockMask = smoothstep(0.77, 0.70, slopeVal);
-          rockMask = max(rockMask, smoothstep(50.0, 68.0, h + (nLarge - 0.5) * 6.0) * smoothstep(0.90, 0.74, ny));
+          float rockMask = smoothstep(slopeThresh, slopeThresh - 0.08, slopeVal);
+          rockMask = max(rockMask, smoothstep(52.0, 68.0, h + (nLarge - 0.5) * 6.0) * smoothstep(0.90, 0.74, ny) * (1.0 - wCanyon * 0.5));
           vec3 surface = mix(ground, rock, rockMask);
 
-          float snowMask = smoothstep(57.0, 65.0, h + (nLarge - 0.5) * 7.0) * smoothstep(0.67, 0.79, ny + brush * 0.35);
+          // Regional snowline: drops dramatically to ~17m in Northern Snowfield, stays high (~58m) elsewhere
+          float snowLine = mix(58.0, 16.0, smoothstep(0.15, 0.75, wSnow));
+          float snowSlope = mix(0.68, 0.54, wSnow);
+          float snowMask = smoothstep(snowLine - 4.0, snowLine + 5.0, h + (nLarge - 0.5) * 7.0)
+                         * smoothstep(snowSlope, snowSlope + 0.14, ny + brush * 0.35)
+                         * (1.0 - wCanyon * 0.85);
+          vec3 snowCol = mix(vec3(0.840, 0.895, 0.945), vec3(0.920, 0.955, 0.990), wSnow * 0.6);
           surface = mix(surface, snowCol, snowMask);
+
+          // Delicate nocturnal bioluminescent moss veins on the Mistwood floor
+          float mossGlowNoise = smoothstep(0.72, 0.90, celNoise(wPos.xz * 0.16 + nLarge * 1.8));
+          gMistGlow = wMistwood * mossGlowNoise * smoothstep(0.72, 0.90, ny) * smoothstep(uWaterLevel + 2.0, uWaterLevel + 6.0, h) * uNightFactor;
 
           diffuseColor.rgb = surface;
         }
@@ -781,6 +1014,7 @@ export function createTerrainMaterial(): THREE.MeshLambertMaterial {
       .replace(
         '#include <opaque_fragment>',
         /* glsl */ `
+        outgoingLight += vec3(0.20, 0.82, 0.72) * gMistGlow * 0.55;
         outgoingLight = applyBotwAtmosphere(outgoingLight, vCelWorldPos);
         #include <opaque_fragment>
         `,
@@ -790,7 +1024,7 @@ export function createTerrainMaterial(): THREE.MeshLambertMaterial {
   return mat;
 }
 
-// ------------------------------------------------------------ Stylized BotW Water
+// ------------------------------------------------------------ Stylized BotW Water (Biome-Aware)
 
 function buildShoreDepthTexture(terrain: Terrain): THREE.DataTexture {
   const N = SEG + 1;
@@ -816,6 +1050,7 @@ function buildShoreDepthTexture(terrain: Terrain): THREE.DataTexture {
 
 export function createWaterMaterial(terrain: Terrain): THREE.ShaderMaterial {
   const depthTex = buildShoreDepthTexture(terrain);
+  const { texA, texB } = getBiomeTextures(terrain);
   return new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
@@ -830,10 +1065,13 @@ export function createWaterMaterial(terrain: Terrain): THREE.ShaderMaterial {
       uSunHaze: celUniforms.uSunHaze,
       uAerialBlue: celUniforms.uAerialBlue,
       uValleyMist: celUniforms.uValleyMist,
+      uValleyMistBoost: celUniforms.uValleyMistBoost,
       uLitTint: celUniforms.uLitTint,
       uFogNear: celUniforms.uFogNear,
       uFogFar: celUniforms.uFogFar,
       uDepthMap: { value: depthTex },
+      uBiomeA: { value: texA },
+      uBiomeB: { value: texB },
       uWaterLevel: { value: WATER_LEVEL },
       uWorldHalf: { value: HALF },
       uWorldSize: { value: WORLD_SIZE },
@@ -851,6 +1089,8 @@ export function createWaterMaterial(terrain: Terrain): THREE.ShaderMaterial {
       uniform float uSunsetFactor;
       uniform vec3 uLitTint;
       uniform sampler2D uDepthMap;
+      uniform sampler2D uBiomeA;
+      uniform sampler2D uBiomeB;
       uniform float uWaterLevel;
       uniform float uWorldHalf;
       uniform float uWorldSize;
@@ -862,18 +1102,44 @@ export function createWaterMaterial(terrain: Terrain): THREE.ShaderMaterial {
       void main() {
         vec2 uv = (vWorldPos.xz + uWorldHalf) / uWorldSize;
         float inside = step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0);
-        float texVal = texture2D(uDepthMap, clamp(uv, 0.0, 1.0)).r;
+        vec2 cuv = clamp(uv, 0.0, 1.0);
+        float texVal = texture2D(uDepthMap, cuv).r;
         float groundH = mix(uWaterLevel - 14.0, (uWaterLevel - 14.0) + texVal * 18.0, inside);
         float depth = max(0.0, uWaterLevel - groundH);
+
+        // Biome tint inside the island (outer ocean smoothly stays classic deep azure)
+        vec4 wA = texture2D(uBiomeA, cuv) * inside;
+        vec4 wB = texture2D(uBiomeB, cuv) * inside;
+        float coastFade = smoothstep(320.0, 210.0, length(vWorldPos.xz));
+        float wKarst = wA.g * coastFade;
+        float wCanyon = wA.b * coastFade;
+        float wMaple = wA.a * coastFade;
+        float wMist = wB.r * coastFade;
+        float wSnow = wB.g * coastFade;
 
         vec3 toFrag = vWorldPos - cameraPosition;
         float dist = length(toFrag);
         vec3 viewDir = toFrag / max(dist, 0.0001);
 
-        // Day -> Sunset -> Moonlit Night water palette
+        // Base ocean/meadow water palette modulated by biome waters
         vec3 colShallow = vec3(0.16, 0.70, 0.62);
         vec3 colMid     = vec3(0.05, 0.39, 0.64);
         vec3 colDeep    = vec3(0.03, 0.18, 0.44);
+
+        // West Karst: luminous jade-emerald lagoon
+        colShallow = mix(colShallow, vec3(0.12, 0.78, 0.56), wKarst * 0.88);
+        colMid     = mix(colMid,     vec3(0.04, 0.48, 0.44), wKarst * 0.85);
+        // East Canyon: warm turquoise-amber coastal cove
+        colShallow = mix(colShallow, vec3(0.28, 0.64, 0.56), wCanyon * 0.75);
+        // South Maple Lake: calm crystal autumn lake (jade-teal mirror)
+        colShallow = mix(colShallow, vec3(0.16, 0.56, 0.50), wMaple * 0.82);
+        colMid     = mix(colMid,     vec3(0.06, 0.29, 0.40), wMaple * 0.82);
+        // Mistwood: deep enigmatic emerald-slate water
+        colShallow = mix(colShallow, vec3(0.07, 0.36, 0.35), wMist * 0.85);
+        colMid     = mix(colMid,     vec3(0.03, 0.19, 0.25), wMist * 0.85);
+        // Northern Snowfield: crisp glacial ice-blue sea
+        colShallow = mix(colShallow, vec3(0.36, 0.76, 0.88), wSnow * 0.85);
+        colMid     = mix(colMid,     vec3(0.11, 0.34, 0.62), wSnow * 0.75);
 
         float shallowT = smoothstep(0.15, 2.5, depth);
         float deepT    = smoothstep(2.2, 9.5, depth);
@@ -884,7 +1150,7 @@ export function createWaterMaterial(terrain: Terrain): THREE.ShaderMaterial {
         waterCol *= mix(vec3(1.0), vec3(1.12, 0.86, 0.74), uSunsetFactor * 0.55);
         waterCol *= mix(vec3(1.0), vec3(0.26, 0.36, 0.58), uNightFactor);
 
-        // Drifting stylized cel wave ribbons
+        // Drifting stylized cel wave ribbons (calmer mirror ripples on South Maple Lake)
         vec2 wUv1 = vWorldPos.xz * 0.22 + vec2(uTime * 0.24, uTime * 0.13);
         vec2 wUv2 = vWorldPos.xz * 0.15 - vec2(uTime * 0.16, uTime * 0.20);
         float r1 = celNoise(wUv1);
@@ -892,7 +1158,7 @@ export function createWaterMaterial(terrain: Terrain): THREE.ShaderMaterial {
         float ripple = smoothstep(0.64, 0.74, r2) * smoothstep(240.0, 35.0, dist);
         vec3 rippleCol = mix(vec3(0.55, 0.92, 0.95), vec3(0.42, 0.64, 0.92), uNightFactor);
         rippleCol = mix(rippleCol, vec3(1.0, 0.80, 0.56), uSunsetFactor * 0.5);
-        waterCol = mix(waterCol, rippleCol, ripple * 0.24);
+        waterCol = mix(waterCol, rippleCol, ripple * mix(0.24, 0.14, wMaple));
 
         // Cloud shadows drifting on the water
         float cSh = mix(0.84, 1.0, celCloudShadow(vWorldPos.xz, uTime));
@@ -906,20 +1172,21 @@ export function createWaterMaterial(terrain: Terrain): THREE.ShaderMaterial {
         float foam = clamp(innerFoam * 0.94 + outerRing * 0.65, 0.0, 1.0) * inside;
         foam *= smoothstep(340.0, 95.0, dist);
 
-        // Crisp HDR sun/moon specular sparkles (catches Selective Soft Bloom!)
-        vec3 waveN = safeNormalize(vec3((r1 - 0.5) * 0.24, 1.0, (r2 - 0.5) * 0.24));
+        // Crisp HDR sun/moon specular sparkles (enhanced silver moon shimmer on South Maple Lake!)
+        vec3 waveN = safeNormalize(vec3((r1 - 0.5) * mix(0.24, 0.14, wMaple), 1.0, (r2 - 0.5) * mix(0.24, 0.14, wMaple)));
         vec3 glintDir = safeNormalize(mix(uSunDir, uMoonDir, step(0.5, uNightFactor)));
         vec3 halfV = safeNormalize(glintDir - viewDir);
-        float spec = safePow(clamp(dot(waveN, halfV), 0.0, 1.0), 85.0);
-        float celSpec = smoothstep(0.30, 0.54, spec) * cSh;
-        vec3 glintCol = mix(uSunHaze * 1.45, vec3(0.85, 1.15, 1.55), uNightFactor);
+        float specPow = mix(85.0, 42.0, wMaple * uNightFactor);
+        float spec = safePow(clamp(dot(waveN, halfV), 0.0, 1.0), specPow);
+        float celSpec = smoothstep(0.28, 0.54, spec) * cSh;
+        vec3 glintCol = mix(uSunHaze * 1.45, vec3(0.85, 1.15, 1.55) * (1.0 + wMaple * 0.45), uNightFactor);
         waterCol += glintCol * celSpec;
 
-        // Grazing Fresnel sky reflection
+        // Grazing Fresnel sky reflection (extra mirror-like on Maple Lake)
         float fresnelBase = clamp(1.0 - clamp(-viewDir.y, 0.0, 1.0), 0.0, 1.0);
         float fresnel = fresnelBase * fresnelBase * fresnelBase;
         vec3 skyRefl = mix(uAerialBlue, uSkyHorizon, 0.52);
-        waterCol = mix(waterCol, skyRefl, fresnel * 0.44);
+        waterCol = mix(waterCol, skyRefl, fresnel * (0.44 + wMaple * 0.18));
 
         // Composite shoreline foam tinted softly by time of day
         vec3 foamCol = mix(vec3(0.92, 0.96, 0.98), vec3(0.98, 0.86, 0.72), uSunsetFactor * 0.6);
@@ -1031,6 +1298,7 @@ export function createSubtleOutlineMaterial(thickness = 0.02, color = '#2a334a')
       uSunHaze: celUniforms.uSunHaze,
       uAerialBlue: celUniforms.uAerialBlue,
       uValleyMist: celUniforms.uValleyMist,
+      uValleyMistBoost: celUniforms.uValleyMistBoost,
       uFogNear: celUniforms.uFogNear,
       uFogFar: celUniforms.uFogFar,
     },
@@ -1083,6 +1351,7 @@ export function createGrassMaterial(isFlower = false): THREE.ShaderMaterial {
       uSunHaze: celUniforms.uSunHaze,
       uAerialBlue: celUniforms.uAerialBlue,
       uValleyMist: celUniforms.uValleyMist,
+      uValleyMistBoost: celUniforms.uValleyMistBoost,
       uShadowTint: celUniforms.uShadowTint,
       uLitTint: celUniforms.uLitTint,
       uFogNear: celUniforms.uFogNear,
@@ -1161,3 +1430,210 @@ export function createGrassMaterial(isFlower = false): THREE.ShaderMaterial {
     `,
   });
 }
+
+// ------------------------------------------------------------ Northern Night Aurora Ribbon Material
+
+export function createAuroraMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    fog: false,
+    uniforms: {
+      uTime: celUniforms.uTime,
+      uNightFactor: celUniforms.uNightFactor,
+    },
+    vertexShader: /* glsl */ `
+      uniform float uTime;
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        vec3 p = position;
+        // Gentle billowing sky curtain
+        float sway = sin(uv.x * 12.566 + uTime * 0.35) * 14.0 + cos(uv.x * 25.13 - uTime * 0.22) * 7.0;
+        p.z += sway;
+        p.y += sin(uv.x * 18.85 + uTime * 0.28) * 6.0;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform float uNightFactor;
+      varying vec2 vUv;
+      ${CEL_NOISE_GLSL}
+
+      void main() {
+        float nightVis = smoothstep(0.28, 0.82, uNightFactor);
+        if (nightVis < 0.01) discard;
+
+        // Vertical luminous rays shimmering horizontally along the aurora curtain
+        float r1 = celNoise(vec2(vUv.x * 18.0 + uTime * 0.14, vUv.y * 1.8));
+        float r2 = celNoise(vec2(vUv.x * 36.0 - uTime * 0.20, vUv.y * 2.4 + 4.1));
+        float rays = smoothstep(0.25, 0.85, r1 * 0.65 + r2 * 0.55);
+
+        float edgeX = smoothstep(0.0, 0.18, vUv.x) * smoothstep(1.0, 0.82, vUv.x);
+        float baseEdge = smoothstep(0.0, 0.20, vUv.y);
+        float topFade = smoothstep(1.0, 0.22, vUv.y);
+        float band = baseEdge * topFade * edgeX * (0.45 + 0.85 * rays);
+
+        // Classic aurora palette: luminous emerald-jade lower rim -> teal -> soft violet crown
+        vec3 colLow  = vec3(0.25, 1.55, 0.98);
+        vec3 colMid  = vec3(0.18, 1.15, 1.38);
+        vec3 colHigh = vec3(0.75, 0.42, 1.45);
+        vec3 col = mix(colLow, colMid, smoothstep(0.08, 0.52, vUv.y));
+        col = mix(col, colHigh, smoothstep(0.48, 0.92, vUv.y));
+
+        float a = band * nightVis * 0.52;
+        if (a < 0.004) discard;
+        gl_FragColor = vec4(col * a, a);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+}
+
+// ------------------------------------------------------------ Karst Cloud Sea Mist Ribbon Material
+
+export function createCloudSeaMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    fog: false,
+    uniforms: {
+      uTime: celUniforms.uTime,
+      uValleyMist: celUniforms.uValleyMist,
+      uSunHaze: celUniforms.uSunHaze,
+      uSunsetFactor: celUniforms.uSunsetFactor,
+      uNightFactor: celUniforms.uNightFactor,
+    },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      varying vec3 vWorldPos;
+      void main() {
+        vUv = uv;
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorldPos = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform vec3 uValleyMist;
+      uniform vec3 uSunHaze;
+      uniform float uSunsetFactor;
+      uniform float uNightFactor;
+      varying vec2 vUv;
+      varying vec3 vWorldPos;
+      ${CEL_NOISE_GLSL}
+
+      void main() {
+        vec2 centered = vUv * 2.0 - 1.0;
+        float r = length(centered);
+        float radial = smoothstep(1.0, 0.25, r);
+        if (radial < 0.01) discard;
+
+        float n1 = celFbm(vWorldPos.xz * 0.018 + vec2(uTime * 0.035, -uTime * 0.018));
+        float n2 = celNoise(vWorldPos.xz * 0.042 - vec2(uTime * 0.025, uTime * 0.02));
+        float wisp = smoothstep(0.32, 0.78, n1 * 0.7 + n2 * 0.3);
+
+        // Fade softly when camera gets right inside the sheet so it never clips harshly
+        float camDist = length(vWorldPos - cameraPosition);
+        float nearFade = smoothstep(8.0, 32.0, camDist);
+
+        vec3 col = mix(uValleyMist, uSunHaze, uSunsetFactor * 0.45);
+        col = mix(col, vec3(0.42, 0.58, 0.72), uNightFactor * 0.65);
+
+        float alpha = radial * wisp * nearFade * mix(0.42, 0.22, uNightFactor);
+        if (alpha < 0.005) discard;
+        gl_FragColor = vec4(col, alpha);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+}
+
+// ------------------------------------------------------------ Mistwood Bioluminescent Mushroom Material
+
+export function createGlowMushroomMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    fog: false,
+    uniforms: {
+      uTime: celUniforms.uTime,
+      uSunDir: celUniforms.uSunDir,
+      uMoonDir: celUniforms.uMoonDir,
+      uNightFactor: celUniforms.uNightFactor,
+      uSkyHorizon: celUniforms.uSkyHorizon,
+      uSunHaze: celUniforms.uSunHaze,
+      uAerialBlue: celUniforms.uAerialBlue,
+      uValleyMist: celUniforms.uValleyMist,
+      uValleyMistBoost: celUniforms.uValleyMistBoost,
+      uShadowTint: celUniforms.uShadowTint,
+      uLitTint: celUniforms.uLitTint,
+      uFogNear: celUniforms.uFogNear,
+      uFogFar: celUniforms.uFogFar,
+    },
+    vertexShader: /* glsl */ `
+      varying vec3 vWorldPos;
+      varying vec3 vWorldNormal;
+      varying vec3 vInstColor;
+      varying float vHeight;
+      void main() {
+        vHeight = clamp(position.y, 0.0, 1.0);
+        #ifdef USE_INSTANCING_COLOR
+          vInstColor = instanceColor;
+        #else
+          vInstColor = vec3(0.25, 0.92, 0.84);
+        #endif
+        vec4 wp = vec4(position, 1.0);
+        vec3 wn = normal;
+        #ifdef USE_INSTANCING
+          wp = instanceMatrix * wp;
+          wn = mat3(instanceMatrix) * wn;
+        #endif
+        wp = modelMatrix * wp;
+        wn = mat3(modelMatrix) * wn;
+        vWorldPos = wp.xyz;
+        float lsq = dot(wn, wn);
+        vWorldNormal = lsq > 1e-10 ? wn * inversesqrt(lsq) : vec3(0.0, 1.0, 0.0);
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform vec3 uShadowTint;
+      uniform vec3 uLitTint;
+      varying vec3 vWorldPos;
+      varying vec3 vWorldNormal;
+      varying vec3 vInstColor;
+      varying float vHeight;
+      ${CEL_SAFE_MATH_GLSL}
+      ${CEL_ATMOS_PARS_GLSL}
+
+      void main() {
+        vec3 n = safeNormalize(vWorldNormal);
+        float ndotl = dot(n, safeNormalize(mix(uSunDir, uMoonDir, uNightFactor)));
+        float cel = smoothstep(-0.08, 0.25, ndotl);
+
+        // Stem is pale cream-teal; cap carries the bioluminescent pigment
+        float capMask = smoothstep(0.32, 0.58, vHeight);
+        vec3 baseCol = mix(vec3(0.68, 0.78, 0.74), vInstColor, capMask);
+        vec3 litCol = baseCol * mix(uShadowTint * 0.95, uLitTint * 1.02, cel);
+
+        // Gentle breathing HDR glow at night (and subtle mystic sheen by day)
+        float pulse = 0.82 + 0.18 * sin(uTime * 1.8 + vWorldPos.x * 0.7 + vWorldPos.z * 0.6);
+        float glowBoost = mix(0.22, 1.85, smoothstep(0.15, 0.85, uNightFactor)) * capMask * pulse;
+        vec3 col = litCol + vInstColor * glowBoost;
+
+        col = applyBotwAtmosphere(col, vWorldPos);
+        gl_FragColor = vec4(col, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+}
+

@@ -197,6 +197,72 @@ body:not(.touch) .action-btn.sprint { display: none; }
 .action-btn.sprint.held { transform: scale(0.92); background: linear-gradient(180deg, rgba(141,255,154,0.35), rgba(60,160,80,0.25)), var(--glass); }
 @keyframes rise-in { from { transform: translateY(12px) scale(0.8); opacity: 0; } to { transform: none; opacity: 1; } }
 
+/* Region arrival banner (BotW-style poetic centered title) */
+.region-banner {
+  position: absolute;
+  top: 26%;
+  left: 50%;
+  transform: translate(-50%, -8px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.85s ease, transform 0.9s cubic-bezier(.2,.8,.2,1);
+}
+.region-banner.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.region-tag {
+  margin-bottom: 6px;
+  padding: 2px 12px;
+  border-radius: 12px;
+  background: rgba(24, 34, 38, 0.42);
+  border: 1px solid rgba(255, 224, 150, 0.52);
+  color: #ffe7a8;
+  font-family: var(--serif);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.32em;
+  text-indent: 0.32em;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
+}
+.region-title-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.region-rule {
+  display: block;
+  width: clamp(28px, 8vw, 68px);
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 246, 224, 0.85), transparent);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+}
+.region-banner strong {
+  font-family: var(--serif);
+  font-weight: 900;
+  font-size: clamp(26px, 6.8vw, 42px);
+  letter-spacing: 0.28em;
+  text-indent: 0.28em;
+  color: #fffcf5;
+  text-shadow: 0 3px 20px rgba(12, 22, 28, 0.65), 0 1px 3px rgba(0, 0, 0, 0.45);
+  white-space: nowrap;
+}
+.region-sub {
+  margin: 8px 0 0;
+  font-family: var(--serif);
+  font-weight: 600;
+  font-size: clamp(12px, 3.2vw, 15px);
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+  color: rgba(255, 250, 238, 0.92);
+  text-shadow: 0 2px 12px rgba(12, 22, 28, 0.7);
+  white-space: nowrap;
+}
+
 /* Toast */
 .toast {
   position: absolute;
@@ -375,6 +441,7 @@ body.touch .desk-only, body:not(.touch) .touch-only { display: none; }
   color: var(--paper);
   font-weight: 600;
   letter-spacing: 0.2em;
+  white-space: nowrap;
   transition: transform 0.12s;
 }
 .map-close:active { transform: scale(0.95); }

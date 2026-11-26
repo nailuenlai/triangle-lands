@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { celUniforms } from './cel';
 import { mulberry32 } from './noise';
+import { BIOMES, BIOME_COUNT } from './biomes';
 
 /**
  * Pooled soft-sprite particle system (one draw call): sparkles, dust,
@@ -155,28 +156,47 @@ export class Particles {
 }
 
 /**
- * GPU-driven toroidal atmospheric motes following the player (zero per-frame CPU loop):
- * - Daytime: airy sunlit pollen & dandelion fluff drifting on mountain breezes
- * - Sunset: warm golden dust glinting in low sunlight
- * - Nighttime: gently pulsing emerald-gold fireflies (螢火蟲)
+ * GPU-driven toroidal atmospheric motes following the player (1 draw call, zero per-frame particle loop):
+ * Smoothly adapts color, drift velocity, size, and glow across the six biomes and day/night cycle:
+ * - 翠野: sunlit pollen (day) / fireflies (night)
+ * - 西嶺石林: jade mountain mist motes
+ * - 東崖赤谷: windblown warm ochre sand & dust
+ * - 南湖楓渚: falling crimson & amber maple leaves (day) / golden fireflies (night)
+ * - 霧林: floating emerald-cyan & lavender glowing spores
+ * - 北境雪原: gently falling snowflakes
  */
 export class AmbientMotes {
   readonly points: THREE.Points;
   private readonly mat: THREE.ShaderMaterial;
+  private readonly curDayA = new THREE.Color(1.18, 1.14, 0.90);
+  private readonly curDayB = new THREE.Color(1.12, 1.20, 0.88);
+  private readonly curNightA = new THREE.Color(1.35, 1.95, 0.58);
+  private readonly curNightB = new THREE.Color(1.85, 1.65, 0.52);
+  private readonly curDrift = new THREE.Vector3(0.75, 0.14, 0.35);
+  private curSize = 0.36;
+  private curDayAlpha = 0.54;
+  private curNightAlpha = 0.92;
+  private readonly driftOffset = new THREE.Vector3();
 
-  constructor(count = 260) {
+  private readonly tmpDayA = new THREE.Color();
+  private readonly tmpDayB = new THREE.Color();
+  private readonly tmpNightA = new THREE.Color();
+  private readonly tmpNightB = new THREE.Color();
+  private readonly tmpDrift = new THREE.Vector3();
+
+  constructor(count = 320) {
     const rand = mulberry32(808);
     const pos = new Float32Array(count * 3);
     const seed = new Float32Array(count * 3); // x: phase, y: size, z: speed
     const boxXZ = 54;
-    const boxY = 16;
+    const boxY = 18;
 
     for (let i = 0; i < count; i++) {
       pos[i * 3] = rand() * boxXZ;
       pos[i * 3 + 1] = rand() * boxY;
       pos[i * 3 + 2] = rand() * boxXZ;
       seed[i * 3] = rand() * Math.PI * 2;
-      seed[i * 3 + 1] = 0.22 + rand() * 0.34;
+      seed[i * 3 + 1] = 0.68 + rand() * 0.68; // multiplier around biome size
       seed[i * 3 + 2] = 0.65 + rand() * 0.9;
     }
 
@@ -194,31 +214,43 @@ export class AmbientMotes {
         uNightFactor: celUniforms.uNightFactor,
         uSunsetFactor: celUniforms.uSunsetFactor,
         uCenter: { value: new THREE.Vector3() },
+        uDriftOffset: { value: this.driftOffset },
         uScale: { value: 400 },
         uBox: { value: new THREE.Vector3(boxXZ, boxY, boxXZ) },
+        uDayColA: { value: this.curDayA },
+        uDayColB: { value: this.curDayB },
+        uNightColA: { value: this.curNightA },
+        uNightColB: { value: this.curNightB },
+        uMoteSize: { value: this.curSize },
+        uDayAlpha: { value: this.curDayAlpha },
+        uNightAlpha: { value: this.curNightAlpha },
       },
       vertexShader: /* glsl */ `
         attribute vec3 aSeed;
         uniform float uTime;
         uniform float uNightFactor;
         uniform vec3 uCenter;
+        uniform vec3 uDriftOffset;
         uniform float uScale;
         uniform vec3 uBox;
+        uniform float uMoteSize;
+        uniform float uDayAlpha;
+        uniform float uNightAlpha;
         varying float vAlpha;
         varying float vPulse;
         varying float vPhase;
 
         void main() {
           float ph = aSeed.x;
-          float sz = aSeed.y;
+          float sz = aSeed.y * uMoteSize;
           float sp = aSeed.z;
           vPhase = ph;
 
-          // Gentle breeze drift + organic wandering
-          vec3 drift = vec3(
-            uTime * (0.65 + 0.45 * sp) + sin(uTime * 0.7 * sp + ph) * 1.4,
-            sin(uTime * 0.9 * sp + ph * 1.7) * 0.9 + uTime * 0.14 * (1.0 - 0.6 * uNightFactor),
-            uTime * (0.32 + 0.25 * sp) + cos(uTime * 0.6 * sp + ph * 1.3) * 1.4
+          // Integrated biome drift + gentle organic flutter
+          vec3 drift = uDriftOffset * (0.72 + 0.42 * sp) + vec3(
+            sin(uTime * 0.85 * sp + ph) * 1.45,
+            sin(uTime * 1.05 * sp + ph * 1.7) * 0.85,
+            cos(uTime * 0.72 * sp + ph * 1.3) * 1.45
           );
 
           // Toroidally wrap around the viewer so motes surround the player everywhere
@@ -235,22 +267,25 @@ export class AmbientMotes {
           float camDist = max(0.5, -mv.z);
           float nearFade = smoothstep(1.2, 4.2, camDist);
 
-          // Night fireflies pulse slowly & luminously; daytime pollen twinkles softly
           float pulseBase = clamp(0.5 + 0.5 * sin(uTime * (1.6 + sp * 1.1) + ph * 3.0), 0.0, 1.0);
-          float fireflyPulse = 0.25 + 0.75 * (pulseBase > 1e-6 ? pow(pulseBase, 2.2) : 0.0);
-          float dayTwinkle = 0.55 + 0.45 * sin(uTime * 1.8 + ph * 2.0);
+          float fireflyPulse = 0.28 + 0.72 * (pulseBase > 1e-6 ? pow(pulseBase, 2.0) : 0.0);
+          float dayTwinkle = 0.62 + 0.38 * sin(uTime * 1.8 + ph * 2.0);
           vPulse = mix(dayTwinkle, fireflyPulse, uNightFactor);
 
-          vAlpha = boxFade * nearFade * vPulse * mix(0.52, 0.92, uNightFactor);
+          vAlpha = boxFade * nearFade * vPulse * mix(uDayAlpha, uNightAlpha, uNightFactor);
 
-          float finalSize = sz * mix(0.75, 1.25, uNightFactor) * (0.7 + 0.4 * vPulse);
-          gl_PointSize = clamp(finalSize * uScale / camDist, 1.5, 22.0);
+          float finalSize = sz * mix(0.88, 1.22, uNightFactor) * (0.76 + 0.34 * vPulse);
+          gl_PointSize = clamp(finalSize * uScale / camDist, 1.6, 24.0);
           gl_Position = projectionMatrix * mv;
         }
       `,
       fragmentShader: /* glsl */ `
         uniform float uNightFactor;
         uniform float uSunsetFactor;
+        uniform vec3 uDayColA;
+        uniform vec3 uDayColB;
+        uniform vec3 uNightColA;
+        uniform vec3 uNightColB;
         varying float vAlpha;
         varying float vPulse;
         varying float vPhase;
@@ -258,20 +293,18 @@ export class AmbientMotes {
         void main() {
           float d = length(gl_PointCoord - 0.5) * 2.0;
           if (d > 1.0) discard;
-          float core = smoothstep(0.55, 0.0, d);
+          float core = smoothstep(0.58, 0.0, d);
           float haloBase = clamp(1.0 - d, 0.0, 1.0);
-          float halo = haloBase > 1e-6 ? pow(haloBase, 2.2) : 0.0;
-          float a = (halo * 0.65 + core * 0.85) * vAlpha;
+          float halo = haloBase > 1e-6 ? pow(haloBase, 2.1) : 0.0;
+          float a = (halo * 0.62 + core * 0.88) * vAlpha;
           if (a < 0.004) discard;
 
-          // Daytime sunlit cream pollen -> Sunset honey-gold -> Night emerald-gold fireflies (HDR for soft bloom)
-          vec3 dayCol = vec3(1.18, 1.14, 0.92);
-          vec3 sunsetCol = vec3(1.45, 1.05, 0.52);
-          vec3 fireflyA = vec3(1.35, 1.95, 0.58);
-          vec3 fireflyB = vec3(1.85, 1.65, 0.52);
-          vec3 nightCol = mix(fireflyA, fireflyB, fract(vPhase * 2.7));
+          float mixF = fract(vPhase * 2.71);
+          vec3 dayCol = mix(uDayColA, uDayColB, mixF);
+          vec3 sunsetCol = mix(dayCol, vec3(1.42, 0.98, 0.52), 0.55);
+          vec3 nightCol = mix(uNightColA, uNightColB, mixF);
 
-          vec3 col = mix(dayCol, sunsetCol, uSunsetFactor * 0.85);
+          vec3 col = mix(dayCol, sunsetCol, uSunsetFactor * 0.72);
           col = mix(col, nightCol, uNightFactor);
 
           gl_FragColor = vec4(col * a, a);
@@ -290,8 +323,53 @@ export class AmbientMotes {
     this.mat.uniforms.uScale.value = (heightPx * 0.5) / Math.tan((fovDeg * Math.PI) / 360);
   }
 
-  update(center: THREE.Vector3) {
-    (this.mat.uniforms.uCenter.value as THREE.Vector3).set(center.x, center.y + 4.5, center.z);
+  update(center: THREE.Vector3, dt = 0.016, weights?: Float32Array) {
+    (this.mat.uniforms.uCenter.value as THREE.Vector3).set(center.x, center.y + 4.8, center.z);
+
+    if (weights) {
+      this.tmpDayA.setRGB(0, 0, 0);
+      this.tmpDayB.setRGB(0, 0, 0);
+      this.tmpNightA.setRGB(0, 0, 0);
+      this.tmpNightB.setRGB(0, 0, 0);
+      this.tmpDrift.set(0, 0, 0);
+      let tSize = 0;
+      let tDayA = 0;
+      let tNightA = 0;
+
+      for (let i = 0; i < BIOME_COUNT; i++) {
+        const w = weights[i];
+        if (w <= 0.0001) continue;
+        const m = BIOMES[i].motes;
+        this.tmpDayA.r += m.dayColA.r * w; this.tmpDayA.g += m.dayColA.g * w; this.tmpDayA.b += m.dayColA.b * w;
+        this.tmpDayB.r += m.dayColB.r * w; this.tmpDayB.g += m.dayColB.g * w; this.tmpDayB.b += m.dayColB.b * w;
+        this.tmpNightA.r += m.nightColA.r * w; this.tmpNightA.g += m.nightColA.g * w; this.tmpNightA.b += m.nightColA.b * w;
+        this.tmpNightB.r += m.nightColB.r * w; this.tmpNightB.g += m.nightColB.g * w; this.tmpNightB.b += m.nightColB.b * w;
+        this.tmpDrift.addScaledVector(m.drift, w);
+        tSize += m.size * w;
+        tDayA += m.dayAlpha * w;
+        tNightA += m.nightAlpha * w;
+      }
+
+      const k = Math.min(1, dt * 1.8);
+      this.curDayA.lerp(this.tmpDayA, k);
+      this.curDayB.lerp(this.tmpDayB, k);
+      this.curNightA.lerp(this.tmpNightA, k);
+      this.curNightB.lerp(this.tmpNightB, k);
+      this.curDrift.lerp(this.tmpDrift, k);
+      this.curSize += (tSize - this.curSize) * k;
+      this.curDayAlpha += (tDayA - this.curDayAlpha) * k;
+      this.curNightAlpha += (tNightA - this.curNightAlpha) * k;
+      this.mat.uniforms.uMoteSize.value = this.curSize;
+      this.mat.uniforms.uDayAlpha.value = this.curDayAlpha;
+      this.mat.uniforms.uNightAlpha.value = this.curNightAlpha;
+    }
+
+    this.driftOffset.addScaledVector(this.curDrift, dt);
+    // Keep offset bounded to prevent float precision drift over long sessions
+    const box = this.mat.uniforms.uBox.value as THREE.Vector3;
+    this.driftOffset.x = ((this.driftOffset.x % box.x) + box.x) % box.x;
+    this.driftOffset.y = ((this.driftOffset.y % box.y) + box.y) % box.y;
+    this.driftOffset.z = ((this.driftOffset.z % box.z) + box.z) % box.z;
   }
 }
 
