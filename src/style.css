@@ -57,6 +57,42 @@ button svg { pointer-events: none; }
 }
 @keyframes exhaust-pulse { from { opacity: 0.45; } to { opacity: 0.95; } }
 
+/* POI proximity focus: cinematic vignette, peripheral glow & soft proportional framing */
+.poi-focus {
+  --poi: 0;
+  --poi-color: #ffe27a;
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+.poi-vignette {
+  position: absolute;
+  inset: 0;
+  opacity: var(--poi);
+  background: radial-gradient(
+    ellipse at 50% 48%,
+    transparent 44%,
+    rgba(12, 20, 26, 0.28) 76%,
+    rgba(8, 14, 20, 0.58) 100%
+  );
+  box-shadow: inset 0 0 calc(28px + var(--poi) * 64px) color-mix(in srgb, var(--poi-color) 28%, transparent);
+}
+.poi-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: calc(var(--poi) * 4.4vh);
+  max-height: 44px;
+  background: linear-gradient(180deg, rgba(10, 16, 22, 0.78), rgba(10, 16, 22, 0.36));
+  opacity: calc(var(--poi) * 0.92);
+}
+.poi-bar-top { top: 0; }
+.poi-bar-bot {
+  bottom: 0;
+  background: linear-gradient(0deg, rgba(10, 16, 22, 0.78), rgba(10, 16, 22, 0.36));
+}
+
 .letterbox {
   position: fixed;
   inset: 0;
@@ -429,60 +465,6 @@ body:not(.touch) .action-btn.sprint { display: none; }
 .action-btn.sprint.held { transform: scale(0.92); background: linear-gradient(180deg, rgba(141,255,154,0.35), rgba(60,160,80,0.25)), var(--glass); }
 @keyframes rise-in { from { transform: translateY(12px) scale(0.76); opacity: 0; } to { transform: none; opacity: 1; } }
 
-/* Wordless Biome Arrival Emblem */
-.region-banner {
-  position: absolute;
-  top: 23%;
-  left: 50%;
-  transform: translate(-50%, -10px);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.9s ease, transform 0.95s cubic-bezier(.2,.8,.2,1);
-}
-.region-banner.show {
-  opacity: 1;
-  transform: translate(-50%, 0);
-}
-.region-crown {
-  width: 24px;
-  height: 14px;
-  filter: drop-shadow(0 0 8px rgba(255, 226, 122, 0.85));
-}
-.region-title-row {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-}
-.region-rule {
-  display: block;
-  width: clamp(40px, 11vw, 96px);
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255, 248, 228, 0.82), transparent);
-  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.35);
-}
-.region-emblem {
-  width: 68px;
-  height: 68px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(20, 32, 38, 0.34), rgba(20, 32, 38, 0.08) 65%, transparent 100%);
-  filter: drop-shadow(0 3px 16px rgba(10, 20, 26, 0.55));
-}
-.region-emblem svg {
-  width: 54px;
-  height: 54px;
-  fill: none;
-  stroke: #fffcf4;
-  stroke-width: 1.75;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
 /* Wordless Onboarding Gestures */
 .onboard-hint {
   position: fixed;
@@ -808,10 +790,65 @@ body.touch .desk-only, body:not(.touch) .touch-only { display: none; }
 .map-close:active { transform: scale(0.92); }
 .map-close svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
 
-.map-canvas {
-  display: block; width: 100%; aspect-ratio: 1;
+.map-canvas-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
   border-radius: 3px;
+  overflow: hidden;
   box-shadow: inset 0 0 0 1px rgba(80,60,30,0.3);
+}
+.map-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+.map-canvas.panning {
+  cursor: grabbing;
+}
+.map-controls {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 2;
+}
+.map-ctrl {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(243, 234, 214, 0.9);
+  color: var(--ink);
+  box-shadow: 0 4px 12px rgba(24, 20, 12, 0.28), inset 0 0 0 1px rgba(80, 60, 30, 0.34);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: transform 0.12s ease, background 0.18s ease, opacity 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+.map-ctrl svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.map-ctrl:hover { background: #fbf4e4; }
+.map-ctrl:active { transform: scale(0.91); }
+.map-ctrl.active {
+  background: #e8653c;
+  color: #fffdf5;
+  box-shadow: 0 4px 14px rgba(214, 75, 53, 0.42), inset 0 0 0 1px rgba(255, 245, 225, 0.55);
+}
+.map-ctrl:disabled {
+  opacity: 0.38;
+  cursor: default;
+  transform: none;
 }
 @media (orientation: landscape) and (max-height: 560px) {
   .map-sheet { width: min(calc(100vh - 36px), 92vw); padding: 8px; }

@@ -29,13 +29,32 @@ function fbm(n: Simplex2, x: number, y: number, oct: number): number {
   return Math.max(0, Math.min(1, (s / norm) * 0.5 + 0.5));
 }
 
+export interface MapPlayerPose {
+  x: number;
+  z: number;
+  /** Character facing angle in radians (world forward = (sin(facing), cos(facing))). */
+  facing: number;
+  /** Camera yaw in radians (camera looks along (-sin(camYaw), -cos(camYaw))). */
+  camYaw: number;
+}
+
+export interface MapViewState {
+  zoom: number;
+  centerX: number;
+  centerZ: number;
+}
+
 /**
  * Topographic parchment map blanketed in layered fog of war.
- * Passing through terrain parts a small ribbon of mist (without showing
- * the player's current position), while resonating with an ancient shrine
- * sweeps away a wide expanse of fog.
+ * Passing through terrain parts a small ribbon of mist, resonating with an
+ * ancient shrine sweeps away a wide expanse of fog, and the map supports
+ * regional zoom/pan along with the explorer's live position and facing.
  */
 export class GameMap {
+  static readonly MIN_ZOOM = 1;
+  static readonly MAX_ZOOM = 4;
+  static readonly REGIONAL_ZOOM = 2.6;
+
   private terrainImg = document.createElement('canvas');
   private fogBase = document.createElement('canvas');
   private fogComp = document.createElement('canvas');
@@ -56,6 +75,13 @@ export class GameMap {
 
   private reveals: Reveal[] = [];
   private dirty = true;
+
+  private zoom = 1;
+  private targetZoom = 1;
+  private centerX = 0;
+  private centerZ = 0;
+  private targetCenterX = 0;
+  private targetCenterZ = 0;
 
   constructor(terrain: Terrain) {
     for (const c of [this.terrainImg, this.fogBase, this.fogComp, this.frameOverlay]) {
@@ -473,8 +499,118 @@ export class GameMap {
     this.dirty = false;
   }
 
+  private clampCenter(x: number, z: number, zoom: number): [number, number] {
+    const maxOff = Math.max(0, HALF - HALF / zoom);
+    return [
+      Math.max(-maxOff, Math.min(maxOff, x)),
+      Math.max(-maxOff, Math.min(maxOff, z)),
+    ];
+  }
+
+  getView(): MapViewState {
+    return { zoom: this.zoom, centerX: this.centerX, centerZ: this.centerZ };
+  }
+
+  getTargetView(): MapViewState {
+    return { zoom: this.targetZoom, centerX: this.targetCenterX, centerZ: this.targetCenterZ };
+  }
+
+  isZoomed(): boolean {
+    return this.targetZoom > 1.05;
+  }
+
+  resetView(immediate = false) {
+    this.targetZoom = GameMap.MIN_ZOOM;
+    this.targetCenterX = 0;
+    this.targetCenterZ = 0;
+    if (immediate) {
+      this.zoom = GameMap.MIN_ZOOM;
+      this.centerX = 0;
+      this.centerZ = 0;
+    }
+  }
+
+  setView(zoom: number, cx: number, cz: number, immediate = false) {
+    const zClamped = Math.max(GameMap.MIN_ZOOM, Math.min(GameMap.MAX_ZOOM, zoom));
+    const [ccx, ccz] = this.clampCenter(cx, cz, zClamped);
+    this.targetZoom = zClamped;
+    this.targetCenterX = ccx;
+    this.targetCenterZ = ccz;
+    if (immediate) {
+      this.zoom = zClamped;
+      this.centerX = ccx;
+      this.centerZ = ccz;
+    }
+  }
+
+  focusOn(wx: number, wz: number, zoom = GameMap.REGIONAL_ZOOM, immediate = false) {
+    this.setView(zoom, wx, wz, immediate);
+  }
+
+  canvasToWorld(canvas: HTMLCanvasElement, clientX: number, clientY: number, useTarget = false): [number, number] {
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return [this.centerX, this.centerZ];
+    const nx = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const ny = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+    const z = useTarget ? this.targetZoom : this.zoom;
+    const cx = useTarget ? this.targetCenterX : this.centerX;
+    const cz = useTarget ? this.targetCenterZ : this.centerZ;
+    const span = WORLD_SIZE / z;
+    return [cx + (nx - 0.5) * span, cz + (ny - 0.5) * span];
+  }
+
+  zoomAroundClientPoint(
+    canvas: HTMLCanvasElement,
+    clientX: number,
+    clientY: number,
+    nextZoom: number,
+    immediate = false,
+  ) {
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const nx = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const ny = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+    const [wx, wz] = this.canvasToWorld(canvas, clientX, clientY, !immediate);
+    const zClamped = Math.max(GameMap.MIN_ZOOM, Math.min(GameMap.MAX_ZOOM, nextZoom));
+    const newSpan = WORLD_SIZE / zClamped;
+    const newCx = wx - (nx - 0.5) * newSpan;
+    const newCz = wz - (ny - 0.5) * newSpan;
+    this.setView(zClamped, newCx, newCz, immediate);
+  }
+
+  panByCanvasDelta(canvas: HTMLCanvasElement, dxCss: number, dyCss: number) {
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0 || this.zoom <= 1.001) return;
+    const span = WORLD_SIZE / this.zoom;
+    const wx = this.centerX - (dxCss / rect.width) * span;
+    const wz = this.centerZ - (dyCss / rect.height) * span;
+    const [cx, cz] = this.clampCenter(wx, wz, this.zoom);
+    this.centerX = this.targetCenterX = cx;
+    this.centerZ = this.targetCenterZ = cz;
+  }
+
+  stepView(dt: number) {
+    const k = 1 - Math.exp(-Math.min(0.1, dt) * 12);
+    this.zoom += (this.targetZoom - this.zoom) * k;
+    this.centerX += (this.targetCenterX - this.centerX) * k;
+    this.centerZ += (this.targetCenterZ - this.centerZ) * k;
+    if (Math.abs(this.targetZoom - this.zoom) < 0.002) this.zoom = this.targetZoom;
+    if (Math.abs(this.targetCenterX - this.centerX) < 0.05) this.centerX = this.targetCenterX;
+    if (Math.abs(this.targetCenterZ - this.centerZ) < 0.05) this.centerZ = this.targetCenterZ;
+    const [cx, cz] = this.clampCenter(this.centerX, this.centerZ, this.zoom);
+    this.centerX = cx;
+    this.centerZ = cz;
+  }
+
   toMap(x: number, z: number, size: number): [number, number] {
     return [((x + HALF) / WORLD_SIZE) * size, ((z + HALF) / WORLD_SIZE) * size];
+  }
+
+  worldToCanvas(x: number, z: number, size: number): [number, number] {
+    const span = WORLD_SIZE / this.zoom;
+    const left = this.centerX - span * 0.5;
+    const top = this.centerZ - span * 0.5;
+    return [((x - left) / span) * size, ((z - top) / span) * size];
   }
 
   draw(
@@ -483,6 +619,7 @@ export class GameMap {
     time = 0,
     visitedBiomes?: ReadonlySet<number>,
     wonders: Wonder[] = [],
+    playerPose?: MapPlayerPose,
   ) {
     if (this.dirty) this.rebuild();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -493,11 +630,16 @@ export class GameMap {
     const ctx = canvas.getContext('2d')!;
     ctx.imageSmoothingEnabled = true;
 
+    const span = WORLD_SIZE / this.zoom;
+    const u0 = (this.centerX - span * 0.5 + HALF) / WORLD_SIZE;
+    const v0 = (this.centerZ - span * 0.5 + HALF) / WORLD_SIZE;
+    const uvSpan = span / WORLD_SIZE;
+
     // 1. Underlying topographic parchment terrain (colored by biome)
-    ctx.drawImage(this.terrainImg, 0, 0, size, size);
+    ctx.drawImage(this.terrainImg, u0 * RES, v0 * RES, uvSpan * RES, uvSpan * RES, 0, 0, size, size);
 
     // 2. Layered fog of war over unexplored areas
-    ctx.drawImage(this.fogComp, 0, 0, size, size);
+    ctx.drawImage(this.fogComp, u0 * RES, v0 * RES, uvSpan * RES, uvSpan * RES, 0, 0, size, size);
 
     // 3. Gently drifting mist wisps clipped strictly to the fogged regions
     const wc = this.wispComp.getContext('2d')!;
@@ -515,41 +657,44 @@ export class GameMap {
 
     ctx.save();
     ctx.globalAlpha = 0.4;
-    ctx.drawImage(this.wispComp, 0, 0, size, size);
+    ctx.drawImage(this.wispComp, u0 * FOG_RES, v0 * FOG_RES, uvSpan * FOG_RES, uvSpan * FOG_RES, 0, 0, size, size);
     ctx.restore();
 
     // 4. Luminous resonance wave ring while a shrine is parting the fog
     const u = size / 100;
+    const mu = u * (1 + (this.zoom - 1) * 0.16);
+    const margin = 12 * mu;
     for (const r of this.reveals) {
       if (r.p <= 0 || r.p >= 1) continue;
       const e = 1 - Math.pow(1 - r.p, 3);
-      const [cx, cy] = this.toMap(r.x, r.z, size);
-      const rad = (r.r / WORLD_SIZE) * size * e * 0.9;
+      const [cx, cy] = this.worldToCanvas(r.x, r.z, size);
+      const rad = (r.r / span) * size * e * 0.9;
       if (rad < 2) continue;
       const fade = (1 - r.p) * Math.min(1, r.p * 6);
       ctx.save();
       ctx.strokeStyle = `rgba(110, 232, 255, ${(fade * 0.72).toFixed(3)})`;
-      ctx.lineWidth = Math.max(1.5, 0.75 * u);
+      ctx.lineWidth = Math.max(1.5, 0.75 * mu);
       ctx.shadowColor = 'rgba(79, 227, 255, 0.85)';
-      ctx.shadowBlur = 1.6 * u;
+      ctx.shadowBlur = 1.6 * mu;
       ctx.beginPath();
       ctx.arc(cx, cy, rad, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
     }
 
-    // 5. Cartographic border, vignette, and compass rose above the fog
+    // 5. Cartographic border, vignette, and compass rose anchored in screen space
     ctx.drawImage(this.frameOverlay, 0, 0, size, size);
 
     // 6. Subtle resonated shrine triangles
     ctx.save();
     for (const t of towers) {
       if (!t.activated) continue;
-      const [x, y] = this.toMap(t.def.x, t.def.z, size);
-      const r = 1.25 * u;
+      const [x, y] = this.worldToCanvas(t.def.x, t.def.z, size);
+      if (x < -margin || x > size + margin || y < -margin || y > size + margin) continue;
+      const r = 1.25 * mu;
       ctx.fillStyle = 'rgba(34, 130, 150, 0.85)';
       ctx.strokeStyle = 'rgba(243, 234, 214, 0.85)';
-      ctx.lineWidth = Math.max(1, 0.3 * u);
+      ctx.lineWidth = Math.max(1, 0.3 * mu);
       ctx.beginPath();
       ctx.moveTo(x, y - r * 1.15);
       ctx.lineTo(x + r, y + r * 0.85);
@@ -565,11 +710,12 @@ export class GameMap {
       ctx.save();
       for (const w of wonders) {
         if (!w.discovered) continue;
-        const [x, y] = this.toMap(w.def.x, w.def.z, size);
-        const r = 1.28 * u;
+        const [x, y] = this.worldToCanvas(w.def.x, w.def.z, size);
+        if (x < -margin || x > size + margin || y < -margin || y > size + margin) continue;
+        const r = 1.28 * mu;
         ctx.fillStyle = 'rgba(176, 62, 42, 0.9)';
         ctx.strokeStyle = 'rgba(248, 240, 222, 0.9)';
-        ctx.lineWidth = Math.max(1, 0.24 * u);
+        ctx.lineWidth = Math.max(1, 0.24 * mu);
         ctx.beginPath();
         ctx.moveTo(x, y - r);
         ctx.lineTo(x + r * 0.4, y - r * 0.4);
@@ -583,7 +729,7 @@ export class GameMap {
         ctx.fill();
         ctx.stroke();
 
-        this.drawWonderGlyph(ctx, w.def.id, x, y + 2.45 * u, u);
+        this.drawWonderGlyph(ctx, w.def.id, x, y + 2.45 * mu, mu);
       }
       ctx.restore();
     }
@@ -592,9 +738,101 @@ export class GameMap {
     ctx.save();
     for (const b of BIOMES) {
       if (visitedBiomes && !visitedBiomes.has(b.index)) continue;
-      const [x, y] = this.toMap(b.labelX, b.labelZ, size);
-      this.drawBiomeWatermark(ctx, b.id, x, y, u);
+      const [x, y] = this.worldToCanvas(b.labelX, b.labelZ, size);
+      if (x < -margin || x > size + margin || y < -margin || y > size + margin) continue;
+      this.drawBiomeWatermark(ctx, b.id, x, y, mu);
     }
+    ctx.restore();
+
+    // 9. Explorer current position & facing direction (drawn crisp above landmarks)
+    if (playerPose) {
+      const [px, py] = this.worldToCanvas(playerPose.x, playerPose.z, size);
+      if (px >= -margin && px <= size + margin && py >= -margin && py <= size + margin) {
+        this.drawPlayerMarker(ctx, px, py, playerPose.facing, playerPose.camYaw, time, mu);
+      }
+    }
+  }
+
+  /** Draws the explorer's live position, camera sight cone, and facing arrowhead. */
+  private drawPlayerMarker(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    facing: number,
+    camYaw: number,
+    time: number,
+    u: number,
+  ) {
+    ctx.save();
+    ctx.translate(x, y);
+
+    // Subtle translucent camera sightline cone oriented along (-sin(camYaw), -cos(camYaw))
+    ctx.save();
+    ctx.rotate(-camYaw);
+    const coneR = 6.2 * u;
+    const halfAng = 0.52; // ~60° view sector
+    const coneGrad = ctx.createRadialGradient(0, 0, 0.5 * u, 0, 0, coneR);
+    coneGrad.addColorStop(0, 'rgba(255, 248, 224, 0.48)');
+    coneGrad.addColorStop(0.55, 'rgba(232, 101, 60, 0.16)');
+    coneGrad.addColorStop(1, 'rgba(232, 101, 60, 0)');
+    ctx.fillStyle = coneGrad;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.arc(0, 0, coneR, -Math.PI / 2 - halfAng, -Math.PI / 2 + halfAng);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // Gentle expanding location halo so the explorer is immediately easy to spot
+    const pulse = (time * 0.52) % 1;
+    const ringR = (1.6 + pulse * 2.8) * u;
+    const ringA = (1 - pulse) * 0.62;
+    ctx.strokeStyle = `rgba(255, 248, 228, ${ringA.toFixed(3)})`;
+    ctx.lineWidth = Math.max(1.2, 0.38 * u);
+    ctx.beginPath();
+    ctx.arc(0, 0, ringR, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Crisp triangular directional arrow aligned to player.facing ((sin(facing), cos(facing)))
+    ctx.save();
+    ctx.rotate(Math.PI - facing);
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+
+    const tipY = -2.15 * u;
+    const wingX = 1.45 * u;
+    const wingY = 1.38 * u;
+    const notchY = 0.68 * u;
+
+    ctx.beginPath();
+    ctx.moveTo(0, tipY);
+    ctx.lineTo(wingX, wingY);
+    ctx.lineTo(0, notchY);
+    ctx.lineTo(-wingX, wingY);
+    ctx.closePath();
+
+    // Soft dark ink drop shadow + warm ivory halo border for readability on all biomes
+    ctx.shadowColor = 'rgba(18, 28, 32, 0.52)';
+    ctx.shadowBlur = 1.1 * u;
+    ctx.strokeStyle = '#fffdf4';
+    ctx.lineWidth = Math.max(2, 0.66 * u);
+    ctx.stroke();
+
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#e8653c';
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(28, 38, 42, 0.85)';
+    ctx.lineWidth = Math.max(1, 0.24 * u);
+    ctx.stroke();
+
+    // Bright ivory core dot for crisp precision
+    ctx.fillStyle = '#fffdf4';
+    ctx.beginPath();
+    ctx.arc(0, -0.05 * u, 0.36 * u, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
     ctx.restore();
   }
 

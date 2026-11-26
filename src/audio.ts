@@ -24,6 +24,23 @@ export interface AudioEnv {
 const PENTA = [293.66, 329.63, 369.99, 440.0, 493.88, 587.33, 659.25, 739.99];
 const BASS = [146.83, 196.0, 220.0];
 
+/** Wind volume multiplier while gliding (softer rushing air so ambient soundscape breathes). */
+export const GLIDE_WIND_VOLUME_SCALE = 0.7;
+
+export function computeBreezeVolume(
+  gust: number,
+  highFactor: number,
+  speed: number,
+  glide: number,
+  windMod: number,
+): number {
+  const raw = Math.min(
+    0.26,
+    (0.042 + gust * 0.045 + highFactor * 0.04 + speed * 0.018 + glide * 0.11) * windMod,
+  );
+  return glide > 0 ? raw * GLIDE_WIND_VOLUME_SCALE : raw;
+}
+
 export class NatureAudio {
   private ctx: AudioContext | null = null;
   private master!: GainNode;
@@ -41,6 +58,7 @@ export class NatureAudio {
 
   private started = false;
   private _muted = false;
+  private _lastBreezeVol = 0;
   private t = 0;
   private birdTimer = 2.5;
   private noteTimer = 5.5;
@@ -60,6 +78,10 @@ export class NatureAudio {
 
   get muted(): boolean {
     return this._muted;
+  }
+
+  get lastBreezeVol(): number {
+    return this._lastBreezeVol;
   }
 
   /** Call inside a user gesture (click / touch / keydown) to unlock & start audio. */
@@ -246,9 +268,10 @@ export class NatureAudio {
     const highFactor = Math.min(1, Math.max(0, (env.altitude - 18) / 42)) + (env.aerial ? 0.55 : 0);
     const windMod = Math.max(0, 1 + bio.windBoost);
     const breezeFreq = (250 + gust * 190 + highFactor * 160 + env.speed * 70 + env.glide * 520) * (bioIdx === 5 ? 1.18 : bioIdx === 4 ? 0.82 : 1.0);
-    const breezeVol = (0.042 + gust * 0.045 + highFactor * 0.04 + env.speed * 0.018 + env.glide * 0.11) * windMod;
+    const breezeVol = computeBreezeVolume(gust, highFactor, env.speed, env.glide, windMod);
+    this._lastBreezeVol = breezeVol;
     this.breezeFilter.frequency.setTargetAtTime(breezeFreq, now, 0.3);
-    this.breezeGain.gain.setTargetAtTime(Math.min(0.26, breezeVol), now, 0.3);
+    this.breezeGain.gain.setTargetAtTime(breezeVol, now, 0.3);
 
     // Rustling leaves (rich in Mistwood & Maple, hushed in Canyon & high Snow)
     const treeZone = env.swimming ? 0.15 : Math.max(0.15, 1 - Math.max(0, (env.altitude - 38) / 28));
