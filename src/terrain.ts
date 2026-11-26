@@ -1,5 +1,5 @@
-import { Simplex2 } from './noise';
-import { BIOME_COUNT, sampleBiomeWeights } from './biomes';
+import { Simplex2 } from './noise.ts';
+import { BIOME_COUNT, sampleBiomeWeights } from './biome-field.ts';
 
 export const WORLD_SIZE = 640;
 export const HALF = WORLD_SIZE / 2;

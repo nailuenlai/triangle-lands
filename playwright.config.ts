@@ -1,8 +1,15 @@
+import fs from 'node:fs';
 import { defineConfig, devices } from '@playwright/test';
+
+const localChrome = !process.env.CI
+  ? [process.env.PLAYWRIGHT_CHROME_PATH, '/usr/bin/google-chrome', '/usr/bin/chromium'].find(
+      (p): p is string => !!p && fs.existsSync(p),
+    )
+  : undefined;
 
 export default defineConfig({
   testDir: './tests',
-  timeout: 30_000,
+  timeout: 60_000,
   retries: 0,
   use: {
     baseURL: 'http://localhost:4173',
@@ -18,9 +25,17 @@ export default defineConfig({
       name: 'mobile-chrome',
       use: {
         ...devices['Pixel 5'],
-        channel: 'chromium',
+        ...(localChrome ? {} : { channel: 'chromium' }),
         launchOptions: {
-          args: ['--enable-viewport', '--touch-events=enabled'],
+          ...(localChrome ? { executablePath: localChrome } : {}),
+          args: [
+            '--enable-viewport',
+            '--touch-events=enabled',
+            '--use-gl=angle',
+            '--use-angle=swiftshader',
+            '--enable-unsafe-swiftshader',
+            '--ignore-gpu-blocklist',
+          ],
         },
       },
     },

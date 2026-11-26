@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite --host",
     "build": "tsc --noEmit && vite build",
+    "check": "node scripts/check.mjs && npm run build",
     "preview": "vite preview --host",
+    "snap": "node scripts/snap.mjs",
     "test": "playwright test"
   },
   "dependencies": {

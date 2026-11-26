@@ -1,7 +1,13 @@
 import * as THREE from 'three';
-import { Simplex2 } from './noise';
+import {
+  BIOME_COUNT,
+  BIOME_SEEDS,
+  sampleBiomeWeights,
+  sampleDominantBiomeIndex,
+  type BiomeId,
+} from './biome-field';
 
-export type BiomeId = 'meadow' | 'karst' | 'canyon' | 'maple' | 'mistwood' | 'snow';
+export { BIOME_COUNT, BIOME_SEEDS, sampleBiomeWeights, type BiomeId };
 
 export interface BiomeMoteProfile {
   dayColA: THREE.Color;
@@ -56,13 +62,9 @@ export interface BiomeDef {
 export const BIOMES: BiomeDef[] = [
   // 0: 翠野 — Central sunlit emerald meadow (baseline)
   {
-    index: 0,
-    id: 'meadow',
+    ...BIOME_SEEDS[0],
     name: '翠野',
     subtitle: '微風拂青丘，花信滿山原',
-    cx: 4,
-    cz: 16,
-    distScale: 1.0,
     labelX: 22,
     labelZ: 28,
     fogNear: 108,
@@ -96,13 +98,9 @@ export const BIOMES: BiomeDef[] = [
   },
   // 1: 西嶺石林 — Western jade limestone karst spires & turquoise lagoons
   {
-    index: 1,
-    id: 'karst',
+    ...BIOME_SEEDS[1],
     name: '西嶺石林',
     subtitle: '千峰拔碧水，雲海繞危崖',
-    cx: -178,
-    cz: -48,
-    distScale: 0.96,
     labelX: -188,
     labelZ: -108,
     fogNear: 78,
@@ -136,13 +134,9 @@ export const BIOMES: BiomeDef[] = [
   },
   // 2: 東崖赤谷 — Eastern terraced red sandstone mesas & desert canyons
   {
-    index: 2,
-    id: 'canyon',
+    ...BIOME_SEEDS[2],
     name: '東崖赤谷',
     subtitle: '丹崖千層疊，長風捲赤沙',
-    cx: 168,
-    cz: -78,
-    distScale: 0.96,
     labelX: 196,
     labelZ: -96,
     fogNear: 94,
@@ -176,13 +170,9 @@ export const BIOMES: BiomeDef[] = [
   },
   // 3: 南湖楓渚 — Southern maple lake, islets, crimson foliage & lotus shoals
   {
-    index: 3,
-    id: 'maple',
+    ...BIOME_SEEDS[3],
     name: '南湖楓渚',
     subtitle: '秋楓映碧水，孤渚泊清波',
-    cx: 112,
-    cz: 146,
-    distScale: 0.95,
     labelX: 112,
     labelZ: 208,
     fogNear: 90,
@@ -216,13 +206,9 @@ export const BIOMES: BiomeDef[] = [
   },
   // 4: 霧林 — Southwestern misty ancient woods & nocturnal bioluminescent spores
   {
-    index: 4,
-    id: 'mistwood',
+    ...BIOME_SEEDS[4],
     name: '霧林',
     subtitle: '古木深藏霧，幽林夜綻光',
-    cx: -128,
-    cz: 155,
-    distScale: 0.95,
     labelX: -74,
     labelZ: 184,
     fogNear: 48,
@@ -256,13 +242,9 @@ export const BIOMES: BiomeDef[] = [
   },
   // 5: 北境雪原 — Northern towering snow peaks, crisp air & night aurora
   {
-    index: 5,
-    id: 'snow',
+    ...BIOME_SEEDS[5],
     name: '北境雪原',
     subtitle: '雪嶺連天白，夜空垂極光',
-    cx: -14,
-    cz: -222,
-    distScale: 0.94,
     labelX: -62,
     labelZ: -194,
     fogNear: 84,
@@ -296,53 +278,8 @@ export const BIOMES: BiomeDef[] = [
   },
 ];
 
-export const BIOME_COUNT = BIOMES.length;
-
-const warpNoiseX = new Simplex2(137);
-const warpNoiseZ = new Simplex2(269);
-
-// Softmax sharpness: lower = crisper regions, higher = wider blend bands
-const SOFTMAX_TEMP = 24.0;
-
-/**
- * Computes smooth, domain-warped biome blend weights (6 floats summing to 1)
- * for any world position (x, z). Writes into `out` to avoid allocations in hot loops.
- */
-export function sampleBiomeWeights(x: number, z: number, out = new Float32Array(BIOME_COUNT)): Float32Array {
-  const wx = x + warpNoiseX.noise(x * 0.0068, z * 0.0068) * 34;
-  const wz = z + warpNoiseZ.noise(x * 0.0068 + 47.2, z * 0.0068 - 29.8) * 34;
-
-  let minD = Infinity;
-  for (let i = 0; i < BIOME_COUNT; i++) {
-    const b = BIOMES[i];
-    const d = Math.hypot(wx - b.cx, wz - b.cz) * b.distScale;
-    out[i] = d;
-    if (d < minD) minD = d;
-  }
-
-  let sum = 0;
-  for (let i = 0; i < BIOME_COUNT; i++) {
-    const e = Math.exp(-(out[i] - minD) / SOFTMAX_TEMP);
-    out[i] = e;
-    sum += e;
-  }
-  const inv = sum > 1e-6 ? 1 / sum : 1;
-  for (let i = 0; i < BIOME_COUNT; i++) out[i] *= inv;
-  return out;
-}
-
-const _domTmp = new Float32Array(BIOME_COUNT);
-
-/** Returns the dominant biome index (0..5) and its weight at (x, z). */
+/** Returns the dominant biome index (0..5), its weight, and its full definition at (x, z). */
 export function sampleDominantBiome(x: number, z: number): { index: number; weight: number; biome: BiomeDef } {
-  sampleBiomeWeights(x, z, _domTmp);
-  let best = 0;
-  let bestW = _domTmp[0];
-  for (let i = 1; i < BIOME_COUNT; i++) {
-    if (_domTmp[i] > bestW) {
-      bestW = _domTmp[i];
-      best = i;
-    }
-  }
-  return { index: best, weight: bestW, biome: BIOMES[best] };
+  const { index, weight } = sampleDominantBiomeIndex(x, z);
+  return { index, weight, biome: BIOMES[index] };
 }

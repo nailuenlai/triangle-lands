@@ -1820,11 +1820,28 @@ if (import.meta.env.DEV) {
       camYaw = yaw;
       camPitch = pitch;
       camTarget.set(x, h + 1.6, z);
+      updateCamera(1 / 60);
+      camera.updateMatrixWorld();
       timeGlide = null;
       timeOfDay = ((tod % 1) + 1) % 1;
       applyDayNight(timeOfDay);
       sampleBiomeWeights(x, z, curBiomeWeights);
       updateBiomeAtmosphere(curBiomeWeights, 1, true);
+    },
+    /** Deterministically run sightline discovery (dev testing only). */
+    stepDiscovery: (dt = 0.3) => {
+      if (state === 'play' || state === 'vista') {
+        if (camOverride) {
+          camera.position.copy(camOverride.pos);
+          camera.lookAt(camOverride.look);
+        } else {
+          updateCamera(1 / 60);
+        }
+        camera.updateMatrixWorld();
+        discoverTimer = 0;
+        checkDiscovery(dt);
+      }
+      return towers.map((t) => t.discovered);
     },
     getState: () => state,
     /** Deterministically step the player (dev testing only). */
@@ -1837,6 +1854,7 @@ if (import.meta.env.DEV) {
         for (const c of courses) { const ev = c.update(elapsed, 1 / 60, chest); if (ev) log.push(`${c.name}:${ev.type}${ev.index}`); }
         const got = orbs.update(elapsed, 1 / 60, chest, true);
         if (got.length) log.push(`orb${got.join(',')}`);
+        checkDiscovery(1 / 60);
       }
       return { mode: player.mode, pos: player.pos.toArray().map((v) => +v.toFixed(2)), st: +player.stamina.toFixed(1), ex: player.exhausted, log };
     },
