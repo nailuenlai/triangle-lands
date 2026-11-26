@@ -51,9 +51,9 @@ const btnAudio = $('btn-audio');
 const iconAudioOn = $('icon-audio-on');
 const iconAudioOff = $('icon-audio-off');
 const btnMap = $('btn-map');
-const regionBannerEl = $('region-banner');
-const regionCrownEl = $('region-crown');
-const regionEmblemEl = $('region-emblem');
+const btnMapLocate = $<HTMLButtonElement>('btn-map-locate');
+const btnMapZoomIn = $<HTMLButtonElement>('btn-map-zoom-in');
+const btnMapZoomOut = $<HTMLButtonElement>('btn-map-zoom-out');
 const towerPill = $('tower-count');
 const towerNum = $('tower-count-num');
 const orbNum = $('orb-count-num');
@@ -67,6 +67,7 @@ const staminaFg = document.getElementById('stamina-fg') as unknown as SVGCircleE
 const staminaBg = document.getElementById('stamina-bg') as unknown as SVGCircleElement;
 const speedlines = $('speedlines');
 const exhaustVignette = $('exhaust-vignette');
+const poiFocusEl = $('poi-focus');
 const letterboxEl = $('letterbox');
 const momentFrameEl = $('moment-frame');
 const trialEl = $('trial');
@@ -77,51 +78,6 @@ const fxLayer = $('fx-layer');
 const actionCueEl = $('action-cue');
 const cueGlideSvg = $('cue-glide');
 const cueUpdraftSvg = $('cue-updraft');
-
-// ------------------------------------------------------------ Biome Arrival SVG Emblems
-const BIOME_EMBLEMS: string[] = [
-  // 0: Meadow — rolling hills + blooming wildflower
-  `<svg viewBox="0 0 56 56">
-    <path d="M8 40Q20 26 32 40M22 40Q36 28 48 40"/>
-    <path d="M22 31v-9"/>
-    <circle cx="22" cy="18" r="2.2" fill="#ffe7a8" stroke="none"/>
-    <circle cx="22" cy="13.5" r="2.2"/><circle cx="26.2" cy="16.6" r="2.2"/>
-    <circle cx="24.6" cy="21.4" r="2.2"/><circle cx="19.4" cy="21.4" r="2.2"/>
-    <circle cx="17.8" cy="16.6" r="2.2"/>
-  </svg>`,
-  // 1: Karst — twin soaring limestone spires + turquoise wave
-  `<svg viewBox="0 0 56 56">
-    <path d="M11 39 19 15 27 39M25 39 35 11 45 39"/>
-    <path d="M9 43Q18 39 28 43T47 43"/>
-    <path d="M16 25Q28 21 40 25" opacity="0.6"/>
-  </svg>`,
-  // 2: Canyon — stepped terraced mesas + desert sun
-  `<svg viewBox="0 0 56 56">
-    <circle cx="38" cy="16" r="5" opacity="0.85"/>
-    <path d="M8 42 14 26h14l4 8h6l4-10h6"/>
-    <path d="M12 34h16M8 42h40"/>
-  </svg>`,
-  // 3: Maple — autumn maple leaf + calm lake reflection
-  `<svg viewBox="0 0 56 56">
-    <path d="M28 10l4 10 10-2-6 8 4 7-12-4-12 4 4-7-6-8 10 2z"/>
-    <path d="M28 29v10M14 43h28M20 47h16" opacity="0.72"/>
-  </svg>`,
-  // 4: Mistwood — wide-canopy ancient tree + luminous spores
-  `<svg viewBox="0 0 56 56">
-    <path d="M14 28a14 11 0 0 1 28 0z"/>
-    <path d="M28 28v14M28 38l-6 4M28 38l6 4"/>
-    <circle cx="15" cy="17" r="1.5" fill="#7fffe8" stroke="none"/>
-    <circle cx="42" cy="19" r="1.5" fill="#7fffe8" stroke="none"/>
-    <circle cx="20" cy="36" r="1.2" fill="#c9b8ff" stroke="none"/>
-    <circle cx="38" cy="35" r="1.2" fill="#7fffe8" stroke="none"/>
-  </svg>`,
-  // 5: Snow — sharp glacier peak + flowing aurora ribbon
-  `<svg viewBox="0 0 56 56">
-    <path d="M10 43 28 17 46 43Z"/>
-    <path d="M21 27l7 4 7-4"/>
-    <path d="M12 16Q22 7 32 13T46 10" stroke="#98ffd8" opacity="0.9"/>
-  </svg>`,
-];
 
 // Build 5 circular arc segments around the orb icon (each 5 orbs = stamina upgrade)
 const orbSegEls: SVGPathElement[] = [];
@@ -382,9 +338,144 @@ input.bindHold(btnSprint, () => audio.unlock());
 input.bindButton(btnInteract, () => { audio.unlock(); input.action = true; });
 input.bindButton(btnMap, () => { audio.unlock(); input.map = true; });
 input.bindButton($('btn-map-close'), () => closeMap());
+input.bindButton(btnMapZoomIn, () => {
+  if (state !== 'map') return;
+  const cur = gameMap.getTargetView();
+  if (!gameMap.isZoomed()) {
+    gameMap.focusOn(player.pos.x, player.pos.z, GameMap.REGIONAL_ZOOM);
+  } else {
+    gameMap.setView(Math.min(GameMap.MAX_ZOOM, cur.zoom * 1.45), cur.centerX, cur.centerZ);
+  }
+  syncMapControls();
+});
+input.bindButton(btnMapZoomOut, () => {
+  if (state !== 'map') return;
+  const cur = gameMap.getTargetView();
+  if (cur.zoom <= 2.0) {
+    gameMap.resetView(false);
+  } else {
+    gameMap.setView(cur.zoom / 1.45, cur.centerX, cur.centerZ);
+  }
+  syncMapControls();
+});
+input.bindButton(btnMapLocate, () => {
+  if (state !== 'map') return;
+  const cur = gameMap.getTargetView();
+  if (!gameMap.isZoomed()) {
+    gameMap.focusOn(player.pos.x, player.pos.z, GameMap.REGIONAL_ZOOM);
+  } else if (Math.hypot(cur.centerX - player.pos.x, cur.centerZ - player.pos.z) < 12) {
+    gameMap.resetView(false);
+  } else {
+    gameMap.focusOn(player.pos.x, player.pos.z, cur.zoom);
+  }
+  syncMapControls();
+});
 mapOverlay.addEventListener('pointerdown', (e) => {
   if (e.target === mapOverlay) closeMap();
 });
+
+// Direct touch & mouse gestures on the parchment map: pinch-to-zoom, drag-to-pan, double-tap & wheel zoom
+{
+  const pointers = new Map<number, { x: number; y: number }>();
+  let pinchStartDist = 0;
+  let pinchStartZoom = 1;
+  let pinchLastMid = { x: 0, y: 0 };
+  let panLast = { x: 0, y: 0 };
+  let tapStart = { x: 0, y: 0, t: 0, moved: false };
+  let lastTap = { x: 0, y: 0, t: 0 };
+
+  const preventMapTouch = (e: Event) => e.preventDefault();
+  mapCanvas.addEventListener('touchstart', preventMapTouch, { passive: false });
+  mapCanvas.addEventListener('touchmove', preventMapTouch, { passive: false });
+  mapCanvas.addEventListener('touchend', preventMapTouch, { passive: false });
+
+  mapCanvas.addEventListener('pointerdown', (e) => {
+    if (state !== 'map') return;
+    e.preventDefault();
+    e.stopPropagation();
+    try { mapCanvas.setPointerCapture(e.pointerId); } catch { /* synthetic or ended pointer */ }
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pointers.size === 1) {
+      panLast = { x: e.clientX, y: e.clientY };
+      tapStart = { x: e.clientX, y: e.clientY, t: performance.now(), moved: false };
+      if (gameMap.isZoomed()) mapCanvas.classList.add('panning');
+    } else if (pointers.size === 2) {
+      const pts = [...pointers.values()];
+      pinchStartDist = Math.max(12, Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y));
+      pinchStartZoom = gameMap.getView().zoom;
+      pinchLastMid = { x: (pts[0].x + pts[1].x) * 0.5, y: (pts[0].y + pts[1].y) * 0.5 };
+      tapStart.moved = true;
+      mapCanvas.classList.add('panning');
+    }
+  });
+
+  mapCanvas.addEventListener('pointermove', (e) => {
+    if (state !== 'map' || !pointers.has(e.pointerId)) return;
+    e.preventDefault();
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pointers.size === 1) {
+      const dx = e.clientX - panLast.x;
+      const dy = e.clientY - panLast.y;
+      panLast = { x: e.clientX, y: e.clientY };
+      if (Math.hypot(e.clientX - tapStart.x, e.clientY - tapStart.y) > 8) {
+        tapStart.moved = true;
+      }
+      if (gameMap.getView().zoom > 1.01) {
+        gameMap.panByCanvasDelta(mapCanvas, dx, dy);
+      }
+    } else if (pointers.size === 2) {
+      const pts = [...pointers.values()];
+      const dist = Math.max(12, Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y));
+      const midX = (pts[0].x + pts[1].x) * 0.5;
+      const midY = (pts[0].y + pts[1].y) * 0.5;
+      gameMap.panByCanvasDelta(mapCanvas, midX - pinchLastMid.x, midY - pinchLastMid.y);
+      pinchLastMid = { x: midX, y: midY };
+      const nextZoom = pinchStartZoom * (dist / pinchStartDist);
+      gameMap.zoomAroundClientPoint(mapCanvas, midX, midY, nextZoom, true);
+      syncMapControls();
+    }
+  });
+
+  const endMapPointer = (e: PointerEvent) => {
+    if (!pointers.has(e.pointerId)) return;
+    const wasSingle = pointers.size === 1;
+    pointers.delete(e.pointerId);
+    if (pointers.size === 1) {
+      const [rem] = pointers.values();
+      panLast = { x: rem.x, y: rem.y };
+      tapStart.moved = true;
+    } else if (pointers.size === 0) {
+      mapCanvas.classList.remove('panning');
+      const now = performance.now();
+      if (wasSingle && !tapStart.moved && now - tapStart.t < 280 && state === 'map') {
+        if (now - lastTap.t < 360 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 36) {
+          if (gameMap.isZoomed()) {
+            gameMap.resetView(false);
+          } else {
+            gameMap.zoomAroundClientPoint(mapCanvas, e.clientX, e.clientY, GameMap.REGIONAL_ZOOM, false);
+          }
+          syncMapControls();
+          lastTap.t = 0;
+        } else {
+          lastTap = { x: e.clientX, y: e.clientY, t: now };
+        }
+      }
+    }
+  };
+  mapCanvas.addEventListener('pointerup', endMapPointer);
+  mapCanvas.addEventListener('pointercancel', endMapPointer);
+
+  mapCanvas.addEventListener('wheel', (e) => {
+    if (state !== 'map') return;
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.25 : 1 / 1.25;
+    gameMap.zoomAroundClientPoint(mapCanvas, e.clientX, e.clientY, gameMap.getTargetView().zoom * factor, false);
+    syncMapControls();
+  }, { passive: false });
+}
+
 hudLeft.addEventListener('pointerdown', (e) => {
   e.stopPropagation();
   wakeHud(4500);
@@ -445,6 +536,12 @@ let introSwoop: {
 } | null = null;
 let vistaBreath = 0; // brief horizon swell when grabbing a mountain-peak orb
 let momentFocus = 0; // 0..1 gentle camera focus while dwelling in a Temporal Moment
+let poiFocus = 0; // 0..1 camera zoom, gaze focus & atmospheric framing near a POI
+let poiKind: 'none' | 'shrine' | 'wonder' | 'trial' = 'none';
+const poiFocusPos = new THREE.Vector3();
+let poiFocusHasPos = false;
+let poiPulse: { pos: THREE.Vector3; t: number; dur: number; color: string; kind: 'shrine' | 'wonder' } | null = null;
+let poiSparkleAcc = 0;
 let mapAnimating = false;
 let elapsed = 0;
 let allDoneShown = false;
@@ -458,7 +555,6 @@ let currentBiome = 0;
 let pendingBiome = 0;
 let pendingBiomeT = 0;
 const regionLastShown = new Map<number, number>();
-let regionBannerTimer = 0;
 let hudQuietTimer = 0;
 let letterboxTimer = 0;
 let onboardShowTimer = 0;
@@ -489,21 +585,6 @@ function triggerLetterbox(ms = 2400) {
   }, ms);
 }
 
-function showRegionBanner(biomeIdx: number, isFirst: boolean) {
-  const b = BIOMES[biomeIdx];
-  if (!b) return;
-  clearTimeout(regionBannerTimer);
-  regionCrownEl.hidden = !isFirst;
-  regionEmblemEl.innerHTML = BIOME_EMBLEMS[biomeIdx] ?? BIOME_EMBLEMS[0];
-  regionBannerEl.classList.remove('show');
-  void regionBannerEl.offsetWidth;
-  regionBannerEl.classList.add('show');
-  audio.playRegionEnter(biomeIdx, isFirst);
-  regionBannerTimer = window.setTimeout(() => {
-    regionBannerEl.classList.remove('show');
-  }, isFirst ? 3600 : 2700);
-}
-
 function updateRegionTracking(dt: number) {
   const { index, weight } = sampleDominantBiome(player.pos.x, player.pos.z);
   if (index === currentBiome) {
@@ -525,11 +606,11 @@ function updateRegionTracking(dt: number) {
       if (isFirst) {
         visitedBiomes.add(index);
         regionLastShown.set(index, elapsed);
-        showRegionBanner(index, true);
+        audio.playRegionEnter(index, true);
         save();
       } else if (elapsed - lastT > 28) {
         regionLastShown.set(index, elapsed);
-        showRegionBanner(index, false);
+        audio.playRegionEnter(index, false);
       }
     }
   }
@@ -835,6 +916,22 @@ function updateStamina(dt: number) {
 
 // ------------------------------------------------------------ Map overlay
 let mapHideTimer = 0;
+function playerMapPose() {
+  return {
+    x: player.pos.x,
+    z: player.pos.z,
+    facing: player.facing,
+    camYaw,
+  };
+}
+
+function syncMapControls() {
+  const tv = gameMap.getTargetView();
+  btnMapZoomIn.disabled = tv.zoom >= GameMap.MAX_ZOOM - 0.05;
+  btnMapZoomOut.disabled = tv.zoom <= GameMap.MIN_ZOOM + 0.05;
+  btnMapLocate.classList.toggle('active', gameMap.isZoomed());
+}
+
 function updateMapStats() {
   const n = towers.filter((t) => t.activated).length;
   const w = wonders.filter((x) => x.discovered).length;
@@ -851,12 +948,15 @@ function openMap(animate = false) {
   clearTimeout(mapHideTimer);
   state = 'map';
   mapAnimating = animate;
+  gameMap.resetView(true);
+  syncMapControls();
   audio.updateMomentDwell(0);
   momentFrameEl.style.setProperty('--dwell', '0');
+  poiFocusEl.style.setProperty('--poi', '0');
   audio.playMap(true);
   updateMapStats();
   mapOverlay.hidden = false;
-  gameMap.draw(mapCanvas, towers, elapsed, visitedBiomes, wonders);
+  gameMap.draw(mapCanvas, towers, elapsed, visitedBiomes, wonders, playerMapPose());
   void mapOverlay.offsetWidth;
   mapOverlay.classList.add('open');
 }
@@ -898,6 +998,15 @@ function lineOfSight(from: THREE.Vector3, to: THREE.Vector3): boolean {
   return true;
 }
 
+const WONDER_SHIMMER_COLORS: Record<string, string> = {
+  sakura: '#ffc4da',
+  arch: '#8ff5e8',
+  bones: '#ffe0a8',
+  gate: '#6beeff',
+  spirittree: '#6cffdd',
+  ice_spire: '#b6eeff',
+};
+
 let discoverTimer = 0;
 function checkDiscovery(dt: number) {
   if (introSwoop) return;
@@ -923,6 +1032,7 @@ function checkDiscovery(dt: number) {
     if (!seenPt) continue;
     t.discovered = true;
     audio.playDiscover();
+    poiPulse = { pos: altarPt.clone(), t: 0, dur: 2.2, color: '#ffbe63', kind: 'shrine' };
     sparkles.burst(seenPt, 32, '#ffc966', 6, 0.55, 1.2, 0.5);
     spawnPickupRipple(seenPt, '#ffc966', 4.0);
     const marker = towerCompassEls[t.index];
@@ -941,6 +1051,7 @@ function checkDiscovery(dt: number) {
     w.discovered = true;
     audio.playWonderDiscover();
     triggerLetterbox(2500);
+    poiPulse = { pos: w.sightPos.clone(), t: 0, dur: 2.8, color: '#ffd685', kind: 'wonder' };
     sparkles.burst(w.sightPos, 65, '#ffe27a', 11, 0.8, 1.8, 0.4);
     spawnPickupRipple(w.sightPos, '#ff7d63', 5.2);
     const sc = toScreen(w.sightPos);
@@ -955,6 +1066,166 @@ function checkDiscovery(dt: number) {
       pingEl(btnMap, 'ping-red');
     }
     save();
+  }
+}
+
+const tmpPoiCandidate = new THREE.Vector3();
+
+/** Evaluates nearby Points of Interest (Shrines, Wonders, Wind Trials) to drive camera zoom, gaze focus & atmospheric framing. */
+function updatePoiFocus(dt: number) {
+  if (state !== 'play' || introSwoop) {
+    poiFocus = Math.max(0, poiFocus - dt * 3.5);
+    if (poiFocus < 0.002) {
+      poiFocus = 0;
+      poiKind = 'none';
+    }
+    poiFocusEl.style.setProperty('--poi', poiFocus.toFixed(3));
+    return;
+  }
+
+  const fwdX = -Math.sin(camYaw);
+  const fwdZ = -Math.cos(camYaw);
+
+  let bestScore = 0;
+  let bestKind: 'none' | 'shrine' | 'wonder' | 'trial' = 'none';
+  let bestColor = '#ffe27a';
+  let bestX = 0, bestY = 0, bestZ = 0;
+  let nearWonder: Wonder | null = null;
+  let nearWonderProx = 0;
+
+  // 1. Ancient Shrines (approaching within 42m -> strong zoom & focus on crystal core)
+  for (const t of towers) {
+    const dx = t.def.x - player.pos.x;
+    const dz = t.def.z - player.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d > 42) continue;
+    const prox = smoothstep(42, 9, d);
+    const inv = d > 0.01 ? 1 / d : 0;
+    const align = fwdX * dx * inv + fwdZ * dz * inv;
+    const viewW = Math.max(smoothstep(16, 7, d) * 0.68, smoothstep(-0.35, 0.48, align));
+    const score = prox * viewW * (t.activated ? 0.68 : 1.0);
+    if (score > bestScore) {
+      bestScore = score;
+      bestKind = 'shrine';
+      bestColor = t.activated ? '#64e8ff' : '#ffbe63';
+      bestX = t.def.x;
+      bestY = t.base + 3.6;
+      bestZ = t.def.z;
+    }
+  }
+
+  // 2. Six Regional Wonders (approaching within 70m -> dramatic telephoto focus & framing)
+  for (const w of wonders) {
+    const dx = w.def.x - player.pos.x;
+    const dz = w.def.z - player.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d > 70) continue;
+    const prox = smoothstep(70, 20, d);
+    if (prox > nearWonderProx) {
+      nearWonderProx = prox;
+      nearWonder = w;
+    }
+    const inv = d > 0.01 ? 1 / d : 0;
+    const align = fwdX * dx * inv + fwdZ * dz * inv;
+    const viewW = Math.max(smoothstep(32, 16, d) * 0.68, smoothstep(-0.35, 0.48, align));
+    const score = prox * viewW;
+    if (score > bestScore) {
+      bestScore = score;
+      bestKind = 'wonder';
+      bestColor = WONDER_SHIMMER_COLORS[w.def.id] ?? '#ffd685';
+      bestX = w.def.x;
+      bestY = w.baseY + w.def.sightY * 0.72;
+      bestZ = w.def.z;
+    }
+  }
+
+  // 3. Uncompleted Wind Trial start rings (approaching within 26m)
+  for (const c of courses) {
+    if (c.done || c.next > 0) continue;
+    const dx = c.start.x - player.pos.x;
+    const dz = c.start.z - player.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d > 26) continue;
+    const prox = smoothstep(26, 7, d);
+    const inv = d > 0.01 ? 1 / d : 0;
+    const align = fwdX * dx * inv + fwdZ * dz * inv;
+    const viewW = Math.max(smoothstep(12, 6, d) * 0.58, smoothstep(-0.25, 0.5, align));
+    const score = prox * viewW * 0.72;
+    if (score > bestScore) {
+      bestScore = score;
+      bestKind = 'trial';
+      bestColor = '#aef4ff';
+      bestX = c.start.x;
+      bestY = c.start.y;
+      bestZ = c.start.z;
+    }
+  }
+
+  // Slightly soften proximity pull while gliding so aerial steering remains spacious
+  if (player.gliding) bestScore *= 0.62;
+
+  // 4. First-time discovery emphasis pulse (brief lens zoom & focus beat)
+  if (poiPulse) {
+    poiPulse.t += dt;
+    if (poiPulse.t >= poiPulse.dur) {
+      poiPulse = null;
+    } else {
+      const pulseEase = Math.sin((poiPulse.t / poiPulse.dur) * Math.PI);
+      const pulseScore = pulseEase * 0.92;
+      if (pulseScore > bestScore) {
+        bestScore = pulseScore;
+        bestKind = poiPulse.kind;
+        bestColor = poiPulse.color;
+        bestX = poiPulse.pos.x;
+        bestY = poiPulse.pos.y;
+        bestZ = poiPulse.pos.z;
+      }
+    }
+  }
+
+  poiFocus += (bestScore - poiFocus) * Math.min(1, dt * 3.4);
+  if (bestScore > 0.02) {
+    poiKind = bestKind;
+    tmpPoiCandidate.set(bestX, bestY, bestZ);
+    if (!poiFocusHasPos) {
+      poiFocusPos.copy(tmpPoiCandidate);
+      poiFocusHasPos = true;
+    } else {
+      poiFocusPos.lerp(tmpPoiCandidate, Math.min(1, dt * 4.5));
+    }
+    poiFocusEl.style.setProperty('--poi-color', bestColor);
+  } else if (poiFocus < 0.01) {
+    poiFocus = 0;
+    poiKind = 'none';
+    poiFocusHasPos = false;
+  }
+
+  poiFocusEl.style.setProperty('--poi', poiFocus.toFixed(3));
+
+  // Living ambient shimmer motes around a nearby Wonder to heighten its visual presence
+  if (nearWonder && nearWonderProx > 0.15) {
+    poiSparkleAcc += dt * (4 + nearWonderProx * 10);
+    const col = WONDER_SHIMMER_COLORS[nearWonder.def.id] ?? '#ffe27a';
+    while (poiSparkleAcc >= 1) {
+      poiSparkleAcc -= 1;
+      const a = Math.random() * Math.PI * 2;
+      const rr = 3 + Math.random() * Math.max(8, nearWonder.def.avoidR * 0.85);
+      sparkles.spawn(
+        nearWonder.def.x + Math.cos(a) * rr,
+        nearWonder.baseY + 1.2 + Math.random() * nearWonder.def.sightY * 1.15,
+        nearWonder.def.z + Math.sin(a) * rr,
+        (Math.random() - 0.5) * 0.8,
+        0.9 + Math.random() * 1.5,
+        (Math.random() - 0.5) * 0.8,
+        col,
+        0.38 + Math.random() * 0.35,
+        1.5 + Math.random() * 0.9,
+        0,
+        0.2,
+      );
+    }
+  } else {
+    poiSparkleAcc = 0;
   }
 }
 
@@ -1415,6 +1686,7 @@ function updatePlayerFx(dt: number) {
 // ------------------------------------------------------------ Camera
 const tmpCamPos = new THREE.Vector3();
 const tmpCineFocus = new THREE.Vector3();
+const tmpPoiLook = new THREE.Vector3();
 
 function updateCamera(dt: number) {
   const look = input.consumeLook();
@@ -1430,13 +1702,22 @@ function updateCamera(dt: number) {
   const breathEase = Math.sin(Math.min(1, vistaBreath) * Math.PI);
 
   if (state === 'play') {
-    // Dynamic framing per movement mode + brief summit vista breath
-    camDistTarget = (player.gliding ? (player.diving ? 14.5 : 12.5) : player.climbing ? 9 : player.sprinting ? 11 : 10)
-      + breathEase * 2.6;
+    // Dynamic framing per movement mode + summit vista breath + POI zoom-in framing
+    const baseDist = player.gliding ? (player.diving ? 14.5 : 12.5) : player.climbing ? 9 : player.sprinting ? 11 : 10;
+    const poiDistPull = poiFocus * (poiKind === 'wonder' ? 1.1 : 1.9);
+    camDistTarget = Math.max(6.8, baseDist + breathEase * 2.6 - poiDistPull);
     // While gliding, ease the camera behind the flight direction
     if (player.gliding && lookIdle > 1.2) {
       const behind = player.facing + Math.PI;
       camYaw += wrap(behind - camYaw) * Math.min(1, dt * 0.9);
+    } else if (!player.gliding && poiFocus > 0.14 && poiFocusHasPos && lookIdle > 0.45) {
+      // Softly guide camera framing toward a nearby POI when the player isn't actively turning
+      const dx = poiFocusPos.x - player.pos.x;
+      const dz = poiFocusPos.z - player.pos.z;
+      if (Math.hypot(dx, dz) > 4.5) {
+        const targetYaw = Math.atan2(-dx, -dz);
+        camYaw += wrap(targetYaw - camYaw) * Math.min(1, dt * 0.55 * poiFocus);
+      }
     }
   }
   const kick = state === 'play'
@@ -1444,10 +1725,11 @@ function updateCamera(dt: number) {
       + (player.gliding ? 5 + Math.min(10, player.speedXZ * 0.35) + (player.diving ? 8 : 0) : 0)
       + breathEase * 4.5
       - momentFocus * 4.5
+      - poiFocus * 11.5
     : state === 'vista'
       ? -momentFocus * 4.5
       : 0;
-  fovKick += (kick - fovKick) * Math.min(1, dt * 3);
+  fovKick += (kick - fovKick) * Math.min(1, dt * 3.4);
   const fov = baseFov + fovKick;
   if (Math.abs(camera.fov - fov) > 0.05) { camera.fov = fov; camera.updateProjectionMatrix(); }
 
@@ -1456,12 +1738,19 @@ function updateCamera(dt: number) {
   const target = new THREE.Vector3(player.pos.x, player.pos.y + 1.6 + camLift, player.pos.z);
   camTarget.lerp(target, Math.min(1, dt * (player.gliding ? 14 : 10)));
 
-  // During shrine resonance Phase 2, smoothly swing gaze briefly toward the newly awakened updraft
+  // During shrine resonance Phase 2, smoothly swing gaze briefly toward the newly awakened updraft;
+  // during normal play near a POI, shift focus toward the landmark while keeping the explorer framed.
   if (state === 'cinematic' && cine?.updraft) {
     const u = cine.updraft;
     const w = smoothstep(1.3, 2.0, cine.t) * (1 - smoothstep(3.3, 4.1, cine.t));
     tmpCineFocus.set(u.x, u.base + 14, u.z);
     camLook.copy(camTarget).lerp(tmpCineFocus, w * 0.68);
+  } else if (state === 'play' && poiFocus > 0.005 && poiFocusHasPos) {
+    tmpPoiLook.subVectors(poiFocusPos, camTarget);
+    const dist = tmpPoiLook.length();
+    if (dist > 24) tmpPoiLook.multiplyScalar(24 / dist);
+    tmpPoiLook.add(camTarget);
+    camLook.copy(camTarget).lerp(tmpPoiLook, poiFocus * 0.46);
   } else {
     camLook.copy(camTarget);
   }
@@ -1572,6 +1861,7 @@ function frame() {
       updateRegionTracking(dt);
       checkDiscovery(dt);
       checkMoments(dt);
+      updatePoiFocus(dt);
 
       chest.set(player.pos.x, player.pos.y + 1.0, player.pos.z);
       onOrbs(orbs.update(elapsed, dt, chest, true));
@@ -1582,6 +1872,7 @@ function frame() {
       saveTimer += dt;
       if (saveTimer > 5) { saveTimer = 0; save(); }
     } else {
+      updatePoiFocus(dt);
       chest.set(player.pos.x, player.pos.y + 1.0, player.pos.z);
       orbs.update(elapsed, dt, chest, false);
       for (const c of courses) c.update(elapsed, dt, new THREE.Vector3(0, -9999, 0));
@@ -1603,7 +1894,9 @@ function frame() {
           closeMap();
         } else {
           if (mapAnimating) mapAnimating = gameMap.advance(dt);
-          gameMap.draw(mapCanvas, towers, elapsed, visitedBiomes, wonders);
+          gameMap.stepView(dt);
+          syncMapControls();
+          gameMap.draw(mapCanvas, towers, elapsed, visitedBiomes, wonders, playerMapPose());
         }
       }
     }
@@ -1636,7 +1929,7 @@ function frame() {
     grounded: player.grounded,
     onStone,
     aerial: state === 'cinematic' || state === 'vista' || player.gliding,
-    glide: player.gliding ? Math.min(1, (player.speedXZ + Math.abs(player.vel.y)) / 22) : 0,
+    glide: player.gliding ? Math.max(0.08, Math.min(1, (player.speedXZ + Math.abs(player.vel.y)) / 22)) : 0,
     climbing: player.climbing,
     biomeIndex: state === 'title' ? 0 : currentBiome,
     nightFactor: celUniforms.uNightFactor.value,
@@ -1749,7 +2042,6 @@ function startGame() {
   wakeHud(5000);
 
   if (!hadSave) {
-    window.setTimeout(() => showRegionBanner(currentBiome, true), 1150);
     onboardShowTimer = window.setTimeout(() => {
       if (state === 'play' && !onboardHint.classList.contains('gone')) {
         onboardHint.classList.add('show');
@@ -1801,8 +2093,11 @@ frame();
 
 if (import.meta.env.DEV) {
   (window as unknown as Record<string, unknown>).__game = {
-    player, towers, wonders, terrain, gameMap, activate, startVista, openMap, audio, orbs, updrafts, courses, world,
-    BIOMES, visitedBiomes, capturedMoments, showRegionBanner,
+    player, towers, wonders, terrain, gameMap, activate, startVista, openMap, closeMap, audio, orbs, updrafts, courses, world,
+    camera, BIOMES, visitedBiomes, capturedMoments,
+    getPoiFocus: () => ({ focus: poiFocus, kind: poiKind }),
+    getFov: () => camera.fov,
+    getBaseFov: () => baseFov,
     setYaw: (y: number) => { camYaw = y; },
     setPitch: (p: number) => { camPitch = p; },
     setTime: (tod: number) => { timeGlide = null; timeOfDay = ((tod % 1) + 1) % 1; applyDayNight(timeOfDay); },
@@ -1857,6 +2152,21 @@ if (import.meta.env.DEV) {
         checkDiscovery(1 / 60);
       }
       return { mode: player.mode, pos: player.pos.toArray().map((v) => +v.toFixed(2)), st: +player.stamina.toFixed(1), ex: player.exhausted, log };
+    },
+    /** Deterministically step region tracking, POI focus, camera, and map view (dev testing only). */
+    stepSystems: (n: number, dt = 1 / 60) => {
+      for (let i = 0; i < n; i++) {
+        elapsed += dt;
+        if (state === 'play') {
+          updateRegionTracking(dt);
+          updatePoiFocus(dt);
+          updateCamera(dt);
+        } else if (state === 'map') {
+          gameMap.stepView(dt);
+          syncMapControls();
+          gameMap.draw(mapCanvas, towers, elapsed, visitedBiomes, wonders, playerMapPose());
+        }
+      }
     },
   };
 }
