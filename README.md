@@ -6,10 +6,12 @@
 
 ```bash
 npm install
-npm run dev      # 開發伺服器（--host，可用手機連同網段測試）
-npm run build    # TypeScript 檢查並輸出靜態檔至 dist/
-npm run preview  # 預覽 dist/ 建置結果
-npm test         # 執行 Playwright 行動端觸控防縮放回歸測試
+npm run dev        # 開發伺服器（--host，可用手機連同網段測試）
+npm run check      # 靜態檢查、測試型別檢查、TypeScript 嚴格檢查與建置
+npm run build      # TypeScript 檢查並輸出靜態檔至 dist/
+npm run preview    # 預覽 dist/ 建置結果
+npm run test:fast  # 快速單瀏覽器（mobile-safari）Playwright 迭代測試
+npm test           # 執行完整 Playwright 回歸測試（觸控防縮放、遠景視線發現、探索體驗）
 ```
 
 推送至 `main` 分支時，[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) 會自動建置並部署 `dist/` 至 GitHub Pages。
@@ -84,9 +86,12 @@ src/
   map.ts          無文字迷霧羊皮紙地圖：六大地域水彩上色、等高線、手繪地域紋章浮水印（僅顯示已訪地域）與奇景小圖示
   audio.ts        Web Audio 程序化自然環境音、各地域調式泛音與無文字互動／探索音效
   style.css       全螢幕畫布、無文字幾何 HUD、動畫紋章、取景框與觸控樣式
+  dev-harness.ts  DEV 專用 window.__game 型別契約（src/main.ts 與 Playwright 測試共用）
   main.ts         遊戲狀態機 (title → play → cinematic / vista → map)、鏡頭、無文字 HUD／特效、存檔 (v2)
 tests/
-  touch-zoom.spec.ts  Playwright 行動端（Chrome / Safari）觸控防縮放回歸測試
+  touch-zoom.spec.ts               Playwright 行動端（Chrome / Safari）觸控防縮放回歸測試
+  sightline-discovery.spec.ts      古碑漸進式視線與遠眺發現回歸測試
+  exploration-adjustments.spec.ts  無彈窗地域切換、滑翔風聲、可縮放地圖與單次奇景聚焦回歸測試
 ```
 
 進度（已發現／已共鳴的古碑、已到訪地域、已發現奇景、已收錄時景、已探索迷霧軌跡、靈光、完成的試煉、看過的操作提示、位置）存在 `localStorage`（`triangle-explorer-v2`）；靜音設定存在 `triangle-explorer-muted`。

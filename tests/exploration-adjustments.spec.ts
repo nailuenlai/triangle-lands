@@ -1,37 +1,11 @@
 import { test, expect, type Page } from '@playwright/test';
 
-interface DevGame {
-  player: {
-    pos: { x: number; y: number; z: number; toArray: () => number[] };
-    facing: number;
-    mode: string;
-  };
-  towers: { def: { x: number; z: number }; base: number; discovered: boolean }[];
-  wonders: { def: { id: string; x: number; z: number }; baseY: number; discovered: boolean }[];
-  gameMap: {
-    getView: () => { zoom: number; centerX: number; centerZ: number };
-    getTargetView: () => { zoom: number; centerX: number; centerZ: number };
-    worldToCanvas: (x: number, z: number, size: number) => [number, number];
-  };
-  audio: { lastBreezeVol: number };
-  visitedBiomes: Set<number>;
-  getPoiFocus: () => { focus: number; kind: string };
-  getFov: () => number;
-  getBaseFov: () => number;
-  snapAt: (x: number, z: number, yaw: number, pitch: number, tod: number) => void;
-  setYaw: (yaw: number) => void;
-  openMap: () => void;
-  closeMap: () => void;
-  stepDiscovery: (dt?: number) => boolean[];
-  stepSystems: (n: number, dt?: number) => void;
-}
-
 async function startGame(page: Page) {
   await page.route('**fonts.googleapis.com**', (route) => route.abort());
   await page.route('**fonts.gstatic.com**', (route) => route.abort());
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#btn-start');
-  await page.waitForFunction(() => Boolean((window as unknown as { __game?: unknown }).__game), null, {
+  await page.waitForFunction(() => Boolean(window.__game), null, {
     polling: 100,
     timeout: 45_000,
   });
@@ -49,7 +23,7 @@ test.describe('Exploration UX adjustments', () => {
 
     // Move into northern snow biome and deterministically step >0.75s of region tracking
     const visitedSnow = await page.evaluate(() => {
-      const g = (window as unknown as { __game: DevGame }).__game;
+      const g = window.__game!;
       g.snapAt(-14, -222, 0, 0.28, 0.39);
       g.stepSystems(60, 1 / 60);
       return g.visitedBiomes.has(5);
@@ -95,7 +69,7 @@ test.describe('Exploration UX adjustments', () => {
 
     // Position player cleanly at a known open spot facing North (Math.PI), then open map
     await page.evaluate(() => {
-      const g = (window as unknown as { __game: DevGame }).__game;
+      const g = window.__game!;
       g.snapAt(10, 70, 0, 0.25, 0.39);
       g.player.facing = Math.PI; // North
       g.openMap();
@@ -105,7 +79,7 @@ test.describe('Exploration UX adjustments', () => {
 
     // Initial view is full island (zoom 1), zoom-out disabled
     const initialView = await page.evaluate(() => {
-      const g = (window as unknown as { __game: DevGame }).__game;
+      const g = window.__game!;
       return g.gameMap.getView();
     });
     expect(initialView.zoom).toBeCloseTo(1, 2);
@@ -114,7 +88,7 @@ test.describe('Exploration UX adjustments', () => {
     // Activate locate/regional button to zoom smoothly into regional detail around player
     await page.locator('#btn-map-locate').dispatchEvent('pointerdown');
     const zoomedView = await page.evaluate(() => {
-      const g = (window as unknown as { __game: DevGame }).__game;
+      const g = window.__game!;
       g.stepSystems(45, 1 / 60);
       return { view: g.gameMap.getView(), target: g.gameMap.getTargetView() };
     });
@@ -127,7 +101,7 @@ test.describe('Exploration UX adjustments', () => {
     // Verify facing direction renders visibly on canvas: North tip is north of player center, South tip is south
     const sampleArrowBalance = async () => {
       return page.evaluate(() => {
-        const g = (window as unknown as { __game: DevGame }).__game;
+        const g = window.__game!;
         const cv = document.getElementById('map-canvas') as HTMLCanvasElement;
         const ctx = cv.getContext('2d')!;
         const [px, py] = g.gameMap.worldToCanvas(g.player.pos.x, g.player.pos.z, cv.width);
@@ -152,7 +126,7 @@ test.describe('Exploration UX adjustments', () => {
     expect(northSample.northHits).toBeGreaterThan(northSample.southHits);
 
     await page.evaluate(() => {
-      const g = (window as unknown as { __game: DevGame }).__game;
+      const g = window.__game!;
       g.player.facing = 0; // South
       g.setYaw(Math.PI);
       g.stepSystems(2, 1 / 60);
@@ -173,7 +147,7 @@ test.describe('Exploration UX adjustments', () => {
     }, { x0: cx, y0: cy, x1: cx - 60, y1: cy - 40 });
 
     const pannedView = await page.evaluate(() => {
-      const g = (window as unknown as { __game: DevGame }).__game;
+      const g = window.__game!;
       g.stepSystems(2, 1 / 60);
       return g.gameMap.getView();
     });
@@ -181,11 +155,11 @@ test.describe('Exploration UX adjustments', () => {
 
     // Zoom back out to full view
     await page.locator('#btn-map-zoom-out').dispatchEvent('pointerdown');
-    await page.evaluate(() => { (window as unknown as { __game: DevGame }).__game.stepSystems(2, 1 / 60); });
+    await page.evaluate(() => { window.__game!.stepSystems(2, 1 / 60); });
     await page.locator('#btn-map-zoom-out').dispatchEvent('pointerdown');
 
     const resetView = await page.evaluate(() => {
-      const g = (window as unknown as { __game: DevGame }).__game;
+      const g = window.__game!;
       g.stepSystems(50, 1 / 60);
       return { view: g.gameMap.getView(), scale: window.visualViewport?.scale ?? 1 };
     });
@@ -198,7 +172,7 @@ test.describe('Exploration UX adjustments', () => {
 
     // Baseline far from any Wonder, facing away (South)
     const baseline = await page.evaluate(() => {
-      const g = (window as unknown as { __game: DevGame }).__game;
+      const g = window.__game!;
       g.snapAt(10, 70, Math.PI, 0.25, 0.39);
       g.stepSystems(60, 1 / 60);
       return {
@@ -213,7 +187,7 @@ test.describe('Exploration UX adjustments', () => {
 
     // Approaching & discovering Shrine #0 (x:0, z:-95) should NOT trigger camera zoom or #poi-focus
     const nearShrine = await page.evaluate(() => {
-      const g = (window as unknown as { __game: DevGame }).__game;
+      const g = window.__game!;
       g.snapAt(0, -81, 0, 0.22, 0.39);
       g.stepDiscovery(0.3);
       g.stepSystems(65, 1 / 60);
@@ -233,7 +207,7 @@ test.describe('Exploration UX adjustments', () => {
 
     // First-time sighting of Sakura Wonder (x:-36, z:22) triggers the one-time zoom & framing pulse
     const firstSightPeak = await page.evaluate(() => {
-      const g = (window as unknown as { __game: DevGame }).__game;
+      const g = window.__game!;
       const sakura = g.wonders.find((w) => w.def.id === 'sakura')!;
       sakura.discovered = false;
       g.snapAt(-36, 46, 0, 0.22, 0.39);
@@ -256,7 +230,7 @@ test.describe('Exploration UX adjustments', () => {
 
     // After the ~4s pulse completes and settles (~6s total), emphasis returns to zero even right next to the Wonder
     const afterPulse = await page.evaluate(() => {
-      const g = (window as unknown as { __game: DevGame }).__game;
+      const g = window.__game!;
       g.stepSystems(240, 1 / 60);
       return {
         poi: g.getPoiFocus(),
@@ -272,7 +246,7 @@ test.describe('Exploration UX adjustments', () => {
 
     // Moving around near / re-approaching the already-discovered Wonder NEVER triggers camera pull again
     const revisit = await page.evaluate(() => {
-      const g = (window as unknown as { __game: DevGame }).__game;
+      const g = window.__game!;
       g.snapAt(-30, 40, 0.25, 0.2, 0.39);
       g.stepDiscovery(0.3);
       g.stepSystems(120, 1 / 60);

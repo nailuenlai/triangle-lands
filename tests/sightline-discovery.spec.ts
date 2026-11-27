@@ -1,14 +1,5 @@
 import { test, expect } from '@playwright/test';
 
-interface DevGameHandle {
-  towers: { def: { name: string; x: number; z: number }; base: number; discovered: boolean }[];
-  startVista: (t: unknown) => void;
-  setYaw: (yaw: number) => void;
-  setPitch: (pitch: number) => void;
-  snapAt: (x: number, z: number, yaw: number, pitch: number, tod: number) => void;
-  stepDiscovery: (dt?: number) => boolean[];
-}
-
 test.describe('Shrine progressive sightline discovery', () => {
   test('boots cleanly with zero errors, skips discovery during intro swoop, and discovers distant shrines via clear/plume/vista sightlines', async ({ page }) => {
     const errors: string[] = [];
@@ -26,14 +17,14 @@ test.describe('Shrine progressive sightline discovery', () => {
 
     // 1. During opening introSwoop, stepDiscovery must NOT prematurely discover distant shrines
     const duringSwoop = await page.evaluate(() => {
-      const g = (window as unknown as { __game: DevGameHandle }).__game;
+      const g = window.__game!;
       return g.stepDiscovery(0.3);
     });
     expect(duringSwoop.some(Boolean), 'introSwoop should not prematurely discover shrines').toBe(false);
 
     // 2. From START_POS (10, 70) looking north across the valley, 初始之碑 (165m) is discovered
     const afterStartLook = await page.evaluate(() => {
-      const g = (window as unknown as { __game: DevGameHandle }).__game;
+      const g = window.__game!;
       g.snapAt(10, 70, 0, 0.14, 0.39);
       return g.stepDiscovery(0.3);
     });
@@ -41,7 +32,7 @@ test.describe('Shrine progressive sightline discovery', () => {
 
     // 3. From Peak (30, 57) overlooking South Maple Lake, 南湖之碑 (152m, altar tucked behind slope) is discovered via plume LOS
     const afterPeakLook = await page.evaluate(() => {
-      const g = (window as unknown as { __game: DevGameHandle }).__game;
+      const g = window.__game!;
       const t3 = g.towers[3];
       const yaw = Math.atan2(-(t3.def.x - 30), -(t3.def.z - 57));
       g.snapAt(30, 57, yaw, 0.14, 0.39);
@@ -51,7 +42,7 @@ test.describe('Shrine progressive sightline discovery', () => {
 
     // 4. In Vista mode (+28m) above 東崖之碑, looking toward reset 初始之碑 (181m) discovers it
     const afterVistaLook = await page.evaluate(() => {
-      const g = (window as unknown as { __game: DevGameHandle }).__game;
+      const g = window.__game!;
       const t0 = g.towers[0];
       const t2 = g.towers[2];
       t0.discovered = false;
