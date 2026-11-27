@@ -19,6 +19,7 @@ import { createWilds, RingCourse, type Updraft, type CourseEvent } from './colle
 import { updateCelTime, updateDayNight, updateBiomeAtmosphere, celUniforms, DAY_PRESETS } from './cel';
 import { BIOMES, BIOME_COUNT, sampleBiomeWeights, sampleDominantBiome } from './biomes';
 import { WONDER_DEFS, MOMENT_DEFS, Wonder } from './landmarks';
+import type { DevGame, GameState, PoiFocusKind } from './dev-harness';
 
 // ------------------------------------------------------------ DOM
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -506,8 +507,7 @@ input.onFirstMove = () => {
 document.body.classList.toggle('touch', isTouch);
 
 // ------------------------------------------------------------ State
-type State = 'title' | 'play' | 'cinematic' | 'vista' | 'map';
-let state: State = 'title';
+let state: GameState = 'title';
 let camYaw = Math.PI;
 let camPitch = 0.32;
 let camDist = 10;
@@ -538,7 +538,7 @@ let introSwoop: {
 let vistaBreath = 0; // brief horizon swell when grabbing a mountain-peak orb
 let momentFocus = 0; // 0..1 gentle camera focus while dwelling in a Temporal Moment
 let poiFocus = 0; // 0..1 one-time camera zoom, gaze focus & framing pulse on first-sight Wonder discovery
-let poiKind: 'none' | 'wonder' = 'none';
+let poiKind: PoiFocusKind = 'none';
 const poiFocusPos = new THREE.Vector3();
 let poiFocusHasPos = false;
 let poiPulse: { pos: THREE.Vector3; t: number; dur: number; color: string; kind: 'wonder' } | null = null;
@@ -2040,7 +2040,7 @@ window.addEventListener('keydown', (e) => {
 frame();
 
 if (import.meta.env.DEV) {
-  (window as unknown as Record<string, unknown>).__game = {
+  const devGame: DevGame = {
     player, towers, wonders, terrain, gameMap, activate, startVista, openMap, closeMap, audio, orbs, updrafts, courses, world,
     camera, BIOMES, visitedBiomes, capturedMoments,
     getPoiFocus: () => ({ focus: poiFocus, kind: poiKind }),
@@ -2122,4 +2122,5 @@ if (import.meta.env.DEV) {
       }
     },
   };
+  window.__game = devGame;
 }

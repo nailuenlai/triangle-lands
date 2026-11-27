@@ -17,6 +17,7 @@ Judgement calls reviewed on changes to `triangle-lands`. Mechanical checks (Type
 
 - `terrain.height()` line-of-sight checks do not include instanced vegetation (`createVegetation`). Whenever changing camera presets, landmark placements, or distant visual cues, visually verify rendered frames across lighting presets (`day`, `sunset`, `night`) to catch foreground tree occlusion or sky contrast issues.
 - Preserve progressive sightline reveal: let triangular terrain slopes and regional fog hide and reveal distant landmarks rather than hard proximity pop-in cutoffs, and ensure opening transitions (`introSwoop`) do not prematurely trigger gameplay discoveries.
+- Keep player camera control sovereign during free `play`: reserve automated FOV zoom, gaze redirection, and vignette/letterbox framing for bounded, one-time discovery beats or explicit modes (`cinematic`, `vista`, Temporal Moment dwell) that yield to manual input, rather than continuous proximity overrides.
 
 ## Throwaway Prototypes
 

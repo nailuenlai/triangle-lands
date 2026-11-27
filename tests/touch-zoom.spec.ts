@@ -96,10 +96,7 @@ test.describe('Touch zoom prevention during gameplay', () => {
       }
     });
 
-    const startPos = await page.evaluate(() => {
-      const g = (window as unknown as { __game: { player: { pos: { toArray: () => number[] } } } }).__game;
-      return g.player.pos.toArray();
-    });
+    const startPos = await page.evaluate(() => window.__game!.player.pos.toArray());
 
     const cdp = await page.context().newCDPSession(page);
 
@@ -148,7 +145,7 @@ test.describe('Touch zoom prevention during gameplay', () => {
     await page.waitForTimeout(150);
 
     const outcome = await page.evaluate(() => {
-      const g = (window as unknown as { __game: { player: { pos: { toArray: () => number[] }; mode: string } } }).__game;
+      const g = window.__game!;
       return {
         scale: window.visualViewport?.scale ?? 1,
         pos: g.player.pos.toArray(),
@@ -242,10 +239,7 @@ test.describe('Touch zoom prevention during gameplay', () => {
     await startGame(page);
     await page.locator('#btn-jump').tap();
     await expect.poll(async () => {
-      return page.evaluate(() => {
-        const g = (window as unknown as { __game: { player: { mode: string; pos: { y: number } } } }).__game;
-        return g.player.mode;
-      });
+      return page.evaluate(() => window.__game!.player.mode);
     }, { timeout: 5_000 }).toBe('air');
   });
 });

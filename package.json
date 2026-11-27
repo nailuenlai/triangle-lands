@@ -6,10 +6,12 @@
   "scripts": {
     "dev": "vite --host",
     "build": "tsc --noEmit && vite build",
-    "check": "node scripts/check.mjs && npm run build",
+    "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit",
+    "check": "node scripts/check.mjs && npm run typecheck:tests && npm run build",
     "preview": "vite preview --host",
     "snap": "node scripts/snap.mjs",
-    "test": "playwright test"
+    "test": "playwright test",
+    "test:fast": "playwright test --project=mobile-safari"
   },
   "dependencies": {
     "three": "^0.187.0"
