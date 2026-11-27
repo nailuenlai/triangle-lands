@@ -675,6 +675,14 @@ export class NatureAudio {
     this.noiseBurst('highpass', 3000, 6000, 0.7, 0.02, 0.25, 0.01);
   }
 
+  /** Airy breeze swell + rising glassy chimes when butterflies unfold a wind trial. */
+  playTrialReveal() {
+    this.noiseBurst('bandpass', 520, 1450, 1.3, 0.028, 0.48, 0.04);
+    [587.33, 739.99, 880, 1174.66].forEach((f, i) => {
+      this.bell(f, i * 0.16, 0.022 + i * 0.002, 1.35);
+    });
+  }
+
   playCourseDone() {
     [587.33, 739.99, 880, 1174.66, 1479.98].forEach((f, i) => this.bell(f, i * 0.09, 0.05, 2.2));
     const ctx = this.ready();

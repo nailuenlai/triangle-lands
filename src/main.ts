@@ -107,6 +107,7 @@ interface SaveData {
   pos?: [number, number, number];
   orbs?: number[];
   courses?: number[];
+  discoveredCourses?: number[];
   tips?: string[];
   explored?: string;
   visitedBiomes?: number[];
@@ -540,7 +541,7 @@ let poiFocus = 0; // 0..1 camera zoom, gaze focus & atmospheric framing near a P
 let poiKind: 'none' | 'shrine' | 'wonder' | 'trial' = 'none';
 const poiFocusPos = new THREE.Vector3();
 let poiFocusHasPos = false;
-let poiPulse: { pos: THREE.Vector3; t: number; dur: number; color: string; kind: 'shrine' | 'wonder' } | null = null;
+let poiPulse: { pos: THREE.Vector3; t: number; dur: number; color: string; kind: 'shrine' | 'wonder' | 'trial' } | null = null;
 let poiSparkleAcc = 0;
 let mapAnimating = false;
 let elapsed = 0;
@@ -756,7 +757,7 @@ function applySave() {
   wonders.forEach((w) => { w.discovered = false; });
   updrafts.forEach((u) => { if (u.towerIndex >= 0) u.active = false; });
   orbs.defs.forEach((d, i) => { orbs.setCollected(i, false); if (d.kind === 'reward') orbs.hide(i); });
-  courses.forEach((c) => c.setDone(false));
+  courses.forEach((c) => { c.discovered = false; c.setDone(false); });
   tipsShown.clear();
   visitedBiomes.clear();
   capturedMoments.clear();
@@ -774,6 +775,7 @@ function applySave() {
       if (u) u.active = true;
     });
     (s.orbs ?? []).forEach((i) => i < orbs.total && orbs.setCollected(i, true));
+    (s.discoveredCourses ?? []).forEach((i) => { if (courses[i]) courses[i].discovered = true; });
     (s.courses ?? []).forEach((i) => courses[i]?.setDone(true));
     (s.tips ?? []).forEach((t) => tipsShown.add(t));
     (s.visitedBiomes ?? []).forEach((b) => b >= 0 && b < BIOME_COUNT && visitedBiomes.add(b));
@@ -806,6 +808,7 @@ function save() {
     pos: [player.pos.x, player.pos.y, player.pos.z],
     orbs: orbs.collected.flatMap((c, i) => (c ? [i] : [])),
     courses: courses.filter((c) => c.done).map((c) => c.id),
+    discoveredCourses: courses.filter((c) => c.discovered).map((c) => c.id),
     tips: [...tipsShown],
     explored: gameMap.serializeTrail(),
     visitedBiomes: [...visitedBiomes],
@@ -850,20 +853,18 @@ towers.forEach((t) => {
     },
   });
 });
-// Unfinished wind trials that you've come near show on the compass
+// Unfinished wind trials appear on the compass only after approaching their summit starting cue
 courses.forEach((c) => {
   const el = document.createElement('span');
   el.className = 'c-trial';
   compassStrip.appendChild(el);
-  let seen = false;
   compassItems.push({
     el,
-    bearing: () => Math.atan2(c.start.x - player.pos.x, -(c.start.z - player.pos.z)),
+    bearing: () => Math.atan2(c.anchor.x - player.pos.x, -(c.anchor.z - player.pos.z)),
     alpha: () => {
-      if (c.done) return 0;
-      const d = Math.hypot(c.start.x - player.pos.x, c.start.z - player.pos.z);
-      if (d < 120) seen = true;
-      return seen ? smoothstep(260, 120, d) * 0.9 : 0;
+      if (c.done || !c.discovered) return 0;
+      const d = Math.hypot(c.anchor.x - player.pos.x, c.anchor.z - player.pos.z);
+      return smoothstep(260, 120, d) * 0.9;
     },
   });
 });
@@ -1139,15 +1140,17 @@ function updatePoiFocus(dt: number) {
     }
   }
 
-  // 3. Uncompleted Wind Trial start rings (approaching within 26m)
+  // 3. Revealed uncompleted Wind Trials (approaching within 26m of summit cue or first ring)
   for (const c of courses) {
-    if (c.done || c.next > 0) continue;
+    if (c.done || !c.revealed || c.next > 0) continue;
+    const dAnchor = Math.hypot(c.anchor.x - player.pos.x, c.anchor.z - player.pos.z);
     const dx = c.start.x - player.pos.x;
     const dz = c.start.z - player.pos.z;
-    const d = Math.hypot(dx, dz);
+    const dStart = Math.hypot(dx, dz);
+    const d = Math.min(dAnchor, dStart);
     if (d > 26) continue;
     const prox = smoothstep(26, 7, d);
-    const inv = d > 0.01 ? 1 / d : 0;
+    const inv = dStart > 0.01 ? 1 / dStart : 0;
     const align = fwdX * dx * inv + fwdZ * dz * inv;
     const viewW = Math.max(smoothstep(12, 6, d) * 0.58, smoothstep(-0.25, 0.5, align));
     const score = prox * viewW * 0.72;
@@ -1537,7 +1540,21 @@ function spawnRingGuideTrail(from: THREE.Vector3, to: THREE.Vector3) {
 
 function onCourse(c: RingCourse, ev: CourseEvent) {
   if (!ev) return;
-  if (ev.type === 'start' || ev.type === 'pass') {
+  if (ev.type === 'reveal') {
+    audio.playTrialReveal();
+    const lift = c.anchor.clone();
+    lift.y += 0.65;
+    sparkles.burst(lift, 22, '#bff8ff', 4.6, 0.55, 1.15, 0.35);
+    spawnRingGuideTrail(lift, c.start);
+    poiPulse = {
+      kind: 'trial',
+      color: '#aef4ff',
+      pos: c.start.clone(),
+      t: 0,
+      dur: 1.9,
+    };
+    save();
+  } else if (ev.type === 'start' || ev.type === 'pass') {
     activeCourse = c;
     trialTickAcc = 0;
     audio.playRing(ev.index - 1);
@@ -1809,6 +1826,7 @@ function sampleWaterProximity(x: number, z: number): number {
 let lastT = performance.now();
 let saveTimer = 0;
 const chest = new THREE.Vector3();
+const FAR_POS = new THREE.Vector3(0, -9999, 0);
 
 // Optional dev-only camera override for clean visual verification shots
 let camOverride: { pos: THREE.Vector3; look: THREE.Vector3 } | null = null;
@@ -1865,7 +1883,8 @@ function frame() {
 
       chest.set(player.pos.x, player.pos.y + 1.0, player.pos.z);
       onOrbs(orbs.update(elapsed, dt, chest, true));
-      for (const c of courses) onCourse(c, c.update(elapsed, dt, chest));
+      const courseProbe = introSwoop ? FAR_POS : chest;
+      for (const c of courses) onCourse(c, c.update(elapsed, dt, courseProbe, sparkles));
       orbComboT -= dt;
       updatePlayerFx(dt);
 
@@ -1875,7 +1894,7 @@ function frame() {
       updatePoiFocus(dt);
       chest.set(player.pos.x, player.pos.y + 1.0, player.pos.z);
       orbs.update(elapsed, dt, chest, false);
-      for (const c of courses) c.update(elapsed, dt, new THREE.Vector3(0, -9999, 0));
+      for (const c of courses) c.update(elapsed, dt, FAR_POS);
       actionCueEl.classList.remove('show');
       if (state === 'vista') {
         checkDiscovery(dt);
@@ -2146,21 +2165,26 @@ if (import.meta.env.DEV) {
         player.update(1 / 60, { move: { x: mx, y: my }, jump: i === jumpAt, sprint }, camYaw, world);
         gameMap.explore(player.pos.x, player.pos.z);
         chest.set(player.pos.x, player.pos.y + 1.0, player.pos.z);
-        for (const c of courses) { const ev = c.update(elapsed, 1 / 60, chest); if (ev) log.push(`${c.name}:${ev.type}${ev.index}`); }
+        for (const c of courses) { const ev = c.update(elapsed, 1 / 60, chest, sparkles); if (ev) log.push(`${c.name}:${ev.type}${ev.index}`); }
         const got = orbs.update(elapsed, 1 / 60, chest, true);
         if (got.length) log.push(`orb${got.join(',')}`);
         checkDiscovery(1 / 60);
       }
       return { mode: player.mode, pos: player.pos.toArray().map((v) => +v.toFixed(2)), st: +player.stamina.toFixed(1), ex: player.exhausted, log };
     },
-    /** Deterministically step region tracking, POI focus, camera, and map view (dev testing only). */
+    /** Deterministically step region tracking, POI focus, collectibles, compass, camera, and map view (dev testing only). */
     stepSystems: (n: number, dt = 1 / 60) => {
       for (let i = 0; i < n; i++) {
         elapsed += dt;
         if (state === 'play') {
+          chest.set(player.pos.x, player.pos.y + 1.0, player.pos.z);
+          orbs.update(elapsed, dt, chest, false);
+          const courseProbe = introSwoop ? FAR_POS : chest;
+          for (const c of courses) onCourse(c, c.update(elapsed, dt, courseProbe, sparkles));
           updateRegionTracking(dt);
           updatePoiFocus(dt);
           updateCamera(dt);
+          updateCompass();
         } else if (state === 'map') {
           gameMap.stepView(dt);
           syncMapControls();
