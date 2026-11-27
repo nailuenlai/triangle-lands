@@ -536,11 +536,11 @@ let introSwoop: {
 } | null = null;
 let vistaBreath = 0; // brief horizon swell when grabbing a mountain-peak orb
 let momentFocus = 0; // 0..1 gentle camera focus while dwelling in a Temporal Moment
-let poiFocus = 0; // 0..1 camera zoom, gaze focus & atmospheric framing near a POI
-let poiKind: 'none' | 'shrine' | 'wonder' | 'trial' = 'none';
+let poiFocus = 0; // 0..1 one-time camera zoom, gaze focus & framing pulse on first-sight Wonder discovery
+let poiKind: 'none' | 'wonder' = 'none';
 const poiFocusPos = new THREE.Vector3();
 let poiFocusHasPos = false;
-let poiPulse: { pos: THREE.Vector3; t: number; dur: number; color: string; kind: 'shrine' | 'wonder' } | null = null;
+let poiPulse: { pos: THREE.Vector3; t: number; dur: number; color: string; kind: 'wonder' } | null = null;
 let poiSparkleAcc = 0;
 let mapAnimating = false;
 let elapsed = 0;
@@ -762,6 +762,12 @@ function applySave() {
   capturedMoments.clear();
   momentDwell.clear();
   regionLastShown.clear();
+  poiPulse = null;
+  poiFocus = 0;
+  poiKind = 'none';
+  poiFocusHasPos = false;
+  poiSparkleAcc = 0;
+  poiFocusEl.style.setProperty('--poi', '0');
   if (s) {
     s.discovered.forEach((i) => towers[i] && (towers[i].discovered = true));
     s.activated.forEach((i) => {
@@ -1032,7 +1038,6 @@ function checkDiscovery(dt: number) {
     if (!seenPt) continue;
     t.discovered = true;
     audio.playDiscover();
-    poiPulse = { pos: altarPt.clone(), t: 0, dur: 2.2, color: '#ffbe63', kind: 'shrine' };
     sparkles.burst(seenPt, 32, '#ffc966', 6, 0.55, 1.2, 0.5);
     spawnPickupRipple(seenPt, '#ffc966', 4.0);
     const marker = towerCompassEls[t.index];
@@ -1050,8 +1055,16 @@ function checkDiscovery(dt: number) {
     if (!lineOfSight(camera.position, w.sightPos)) continue;
     w.discovered = true;
     audio.playWonderDiscover();
-    triggerLetterbox(2500);
-    poiPulse = { pos: w.sightPos.clone(), t: 0, dur: 2.8, color: '#ffd685', kind: 'wonder' };
+    triggerLetterbox(3900);
+    if (state === 'play') {
+      poiPulse = {
+        pos: w.sightPos.clone(),
+        t: 0,
+        dur: 4.0,
+        color: WONDER_SHIMMER_COLORS[w.def.id] ?? '#ffd685',
+        kind: 'wonder',
+      };
+    }
     sparkles.burst(w.sightPos, 65, '#ffe27a', 11, 0.8, 1.8, 0.4);
     spawnPickupRipple(w.sightPos, '#ff7d63', 5.2);
     const sc = toScreen(w.sightPos);
@@ -1071,130 +1084,44 @@ function checkDiscovery(dt: number) {
 
 const tmpPoiCandidate = new THREE.Vector3();
 
-/** Evaluates nearby Points of Interest (Shrines, Wonders, Wind Trials) to drive camera zoom, gaze focus & atmospheric framing. */
+/** Drives the one-time first-sight Wonder camera emphasis pulse and ambient Wonder shimmer motes. */
 function updatePoiFocus(dt: number) {
   if (state !== 'play' || introSwoop) {
-    poiFocus = Math.max(0, poiFocus - dt * 3.5);
+    poiPulse = null;
+    poiFocus = Math.max(0, poiFocus - dt * 4.5);
     if (poiFocus < 0.002) {
       poiFocus = 0;
       poiKind = 'none';
+      poiFocusHasPos = false;
     }
     poiFocusEl.style.setProperty('--poi', poiFocus.toFixed(3));
     return;
   }
 
-  const fwdX = -Math.sin(camYaw);
-  const fwdZ = -Math.cos(camYaw);
-
-  let bestScore = 0;
-  let bestKind: 'none' | 'shrine' | 'wonder' | 'trial' = 'none';
-  let bestColor = '#ffe27a';
-  let bestX = 0, bestY = 0, bestZ = 0;
-  let nearWonder: Wonder | null = null;
-  let nearWonderProx = 0;
-
-  // 1. Ancient Shrines (approaching within 42m -> strong zoom & focus on crystal core)
-  for (const t of towers) {
-    const dx = t.def.x - player.pos.x;
-    const dz = t.def.z - player.pos.z;
-    const d = Math.hypot(dx, dz);
-    if (d > 42) continue;
-    const prox = smoothstep(42, 9, d);
-    const inv = d > 0.01 ? 1 / d : 0;
-    const align = fwdX * dx * inv + fwdZ * dz * inv;
-    const viewW = Math.max(smoothstep(16, 7, d) * 0.68, smoothstep(-0.35, 0.48, align));
-    const score = prox * viewW * (t.activated ? 0.68 : 1.0);
-    if (score > bestScore) {
-      bestScore = score;
-      bestKind = 'shrine';
-      bestColor = t.activated ? '#64e8ff' : '#ffbe63';
-      bestX = t.def.x;
-      bestY = t.base + 3.6;
-      bestZ = t.def.z;
-    }
-  }
-
-  // 2. Six Regional Wonders (approaching within 70m -> dramatic telephoto focus & framing)
-  for (const w of wonders) {
-    const dx = w.def.x - player.pos.x;
-    const dz = w.def.z - player.pos.z;
-    const d = Math.hypot(dx, dz);
-    if (d > 70) continue;
-    const prox = smoothstep(70, 20, d);
-    if (prox > nearWonderProx) {
-      nearWonderProx = prox;
-      nearWonder = w;
-    }
-    const inv = d > 0.01 ? 1 / d : 0;
-    const align = fwdX * dx * inv + fwdZ * dz * inv;
-    const viewW = Math.max(smoothstep(32, 16, d) * 0.68, smoothstep(-0.35, 0.48, align));
-    const score = prox * viewW;
-    if (score > bestScore) {
-      bestScore = score;
-      bestKind = 'wonder';
-      bestColor = WONDER_SHIMMER_COLORS[w.def.id] ?? '#ffd685';
-      bestX = w.def.x;
-      bestY = w.baseY + w.def.sightY * 0.72;
-      bestZ = w.def.z;
-    }
-  }
-
-  // 3. Uncompleted Wind Trial start rings (approaching within 26m)
-  for (const c of courses) {
-    if (c.done || c.next > 0) continue;
-    const dx = c.start.x - player.pos.x;
-    const dz = c.start.z - player.pos.z;
-    const d = Math.hypot(dx, dz);
-    if (d > 26) continue;
-    const prox = smoothstep(26, 7, d);
-    const inv = d > 0.01 ? 1 / d : 0;
-    const align = fwdX * dx * inv + fwdZ * dz * inv;
-    const viewW = Math.max(smoothstep(12, 6, d) * 0.58, smoothstep(-0.25, 0.5, align));
-    const score = prox * viewW * 0.72;
-    if (score > bestScore) {
-      bestScore = score;
-      bestKind = 'trial';
-      bestColor = '#aef4ff';
-      bestX = c.start.x;
-      bestY = c.start.y;
-      bestZ = c.start.z;
-    }
-  }
-
-  // Slightly soften proximity pull while gliding so aerial steering remains spacious
-  if (player.gliding) bestScore *= 0.62;
-
-  // 4. First-time discovery emphasis pulse (brief lens zoom & focus beat)
+  // One-time discovery emphasis pulse when a Wonder first enters the frame (~4s smooth swell & release)
+  let targetFocus = 0;
   if (poiPulse) {
     poiPulse.t += dt;
     if (poiPulse.t >= poiPulse.dur) {
       poiPulse = null;
     } else {
       const pulseEase = Math.sin((poiPulse.t / poiPulse.dur) * Math.PI);
-      const pulseScore = pulseEase * 0.92;
-      if (pulseScore > bestScore) {
-        bestScore = pulseScore;
-        bestKind = poiPulse.kind;
-        bestColor = poiPulse.color;
-        bestX = poiPulse.pos.x;
-        bestY = poiPulse.pos.y;
-        bestZ = poiPulse.pos.z;
+      targetFocus = pulseEase * 0.95;
+      poiKind = poiPulse.kind;
+      tmpPoiCandidate.copy(poiPulse.pos);
+      if (!poiFocusHasPos) {
+        poiFocusPos.copy(tmpPoiCandidate);
+        poiFocusHasPos = true;
+      } else {
+        poiFocusPos.lerp(tmpPoiCandidate, Math.min(1, dt * 6));
       }
+      poiFocusEl.style.setProperty('--poi-color', poiPulse.color);
     }
   }
 
-  poiFocus += (bestScore - poiFocus) * Math.min(1, dt * 3.4);
-  if (bestScore > 0.02) {
-    poiKind = bestKind;
-    tmpPoiCandidate.set(bestX, bestY, bestZ);
-    if (!poiFocusHasPos) {
-      poiFocusPos.copy(tmpPoiCandidate);
-      poiFocusHasPos = true;
-    } else {
-      poiFocusPos.lerp(tmpPoiCandidate, Math.min(1, dt * 4.5));
-    }
-    poiFocusEl.style.setProperty('--poi-color', bestColor);
-  } else if (poiFocus < 0.01) {
+  const focusRate = targetFocus > poiFocus ? 5.0 : 4.5;
+  poiFocus += (targetFocus - poiFocus) * Math.min(1, dt * focusRate);
+  if (targetFocus <= 0 && poiFocus < 0.005) {
     poiFocus = 0;
     poiKind = 'none';
     poiFocusHasPos = false;
@@ -1202,7 +1129,18 @@ function updatePoiFocus(dt: number) {
 
   poiFocusEl.style.setProperty('--poi', poiFocus.toFixed(3));
 
-  // Living ambient shimmer motes around a nearby Wonder to heighten its visual presence
+  // Living ambient shimmer motes around a nearby Wonder (purely visual; no camera effect)
+  let nearWonder: Wonder | null = null;
+  let nearWonderProx = 0;
+  for (const w of wonders) {
+    const d = Math.hypot(w.def.x - player.pos.x, w.def.z - player.pos.z);
+    if (d > 70) continue;
+    const prox = smoothstep(70, 20, d);
+    if (prox > nearWonderProx) {
+      nearWonderProx = prox;
+      nearWonder = w;
+    }
+  }
   if (nearWonder && nearWonderProx > 0.15) {
     poiSparkleAcc += dt * (4 + nearWonderProx * 10);
     const col = WONDER_SHIMMER_COLORS[nearWonder.def.id] ?? '#ffe27a';
@@ -1702,16 +1640,16 @@ function updateCamera(dt: number) {
   const breathEase = Math.sin(Math.min(1, vistaBreath) * Math.PI);
 
   if (state === 'play') {
-    // Dynamic framing per movement mode + summit vista breath + POI zoom-in framing
+    // Dynamic framing per movement mode + summit vista breath + one-time Wonder discovery zoom-in
     const baseDist = player.gliding ? (player.diving ? 14.5 : 12.5) : player.climbing ? 9 : player.sprinting ? 11 : 10;
-    const poiDistPull = poiFocus * (poiKind === 'wonder' ? 1.1 : 1.9);
+    const poiDistPull = poiFocus * 1.1;
     camDistTarget = Math.max(6.8, baseDist + breathEase * 2.6 - poiDistPull);
     // While gliding, ease the camera behind the flight direction
     if (player.gliding && lookIdle > 1.2) {
       const behind = player.facing + Math.PI;
       camYaw += wrap(behind - camYaw) * Math.min(1, dt * 0.9);
     } else if (!player.gliding && poiFocus > 0.14 && poiFocusHasPos && lookIdle > 0.45) {
-      // Softly guide camera framing toward a nearby POI when the player isn't actively turning
+      // Softly guide camera framing toward a newly discovered Wonder when the player isn't actively turning
       const dx = poiFocusPos.x - player.pos.x;
       const dz = poiFocusPos.z - player.pos.z;
       if (Math.hypot(dx, dz) > 4.5) {
@@ -1739,7 +1677,7 @@ function updateCamera(dt: number) {
   camTarget.lerp(target, Math.min(1, dt * (player.gliding ? 14 : 10)));
 
   // During shrine resonance Phase 2, smoothly swing gaze briefly toward the newly awakened updraft;
-  // during normal play near a POI, shift focus toward the landmark while keeping the explorer framed.
+  // during a one-time Wonder discovery pulse, shift focus toward the Wonder while keeping the explorer framed.
   if (state === 'cinematic' && cine?.updraft) {
     const u = cine.updraft;
     const w = smoothstep(1.3, 2.0, cine.t) * (1 - smoothstep(3.3, 4.1, cine.t));
