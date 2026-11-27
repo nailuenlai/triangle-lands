@@ -185,12 +185,12 @@ scene.add(hemi);
 const sun = new THREE.DirectionalLight('#fff3db', 2.4);
 sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
-const SHADOW_RANGE = 62;
-const SHADOW_TEXEL = (SHADOW_RANGE * 2) / 1024;
-sun.shadow.camera.left = -SHADOW_RANGE;
-sun.shadow.camera.right = SHADOW_RANGE;
-sun.shadow.camera.top = SHADOW_RANGE;
-sun.shadow.camera.bottom = -SHADOW_RANGE;
+let shadowRange = 62;
+let shadowTexel = (shadowRange * 2) / 1024;
+sun.shadow.camera.left = -shadowRange;
+sun.shadow.camera.right = shadowRange;
+sun.shadow.camera.top = shadowRange;
+sun.shadow.camera.bottom = -shadowRange;
 sun.shadow.camera.near = 10;
 sun.shadow.camera.far = 260;
 sun.shadow.bias = -0.00045;
@@ -198,11 +198,34 @@ sun.shadow.normalBias = 0.08;
 sun.position.copy(sunDir).multiplyScalar(120);
 scene.add(sun, sun.target);
 
+function setShadowConfig(size: number, range: number, soft: boolean) {
+  shadowRange = range;
+  shadowTexel = (range * 2) / size;
+  sun.shadow.camera.left = -range;
+  sun.shadow.camera.right = range;
+  sun.shadow.camera.top = range;
+  sun.shadow.camera.bottom = -range;
+  sun.shadow.camera.far = Math.max(260, range * 2.8);
+  sun.shadow.camera.updateProjectionMatrix();
+  if (sun.shadow.mapSize.width !== size || sun.shadow.mapSize.height !== size) {
+    sun.shadow.mapSize.set(size, size);
+    if (sun.shadow.map) {
+      sun.shadow.map.dispose();
+      sun.shadow.map = null;
+    }
+  }
+  const nextType = soft ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+  if (renderer.shadowMap.type !== nextType) {
+    renderer.shadowMap.type = nextType;
+    renderer.shadowMap.needsUpdate = true;
+  }
+}
+
 const shadowFocus = new THREE.Vector3();
 function updateSunShadow(fx: number, fy: number, fz: number) {
   // Texel-snap to prevent shadow edge shimmer during movement
-  const sx = Math.round(fx / SHADOW_TEXEL) * SHADOW_TEXEL;
-  const sz = Math.round(fz / SHADOW_TEXEL) * SHADOW_TEXEL;
+  const sx = Math.round(fx / shadowTexel) * shadowTexel;
+  const sz = Math.round(fz / shadowTexel) * shadowTexel;
   shadowFocus.set(sx, fy, sz);
   sun.target.position.copy(shadowFocus);
   sun.position.copy(shadowFocus).addScaledVector(sunDir, 125);
@@ -242,7 +265,8 @@ applyDayNight(timeOfDay);
 
 const terrain = createIslandTerrain();
 const sky = createSky(sunDir);
-scene.add(sky, createTerrainMesh(terrain), createWater(terrain));
+const waterMesh = createWater(terrain);
+scene.add(sky, createTerrainMesh(terrain), waterMesh);
 
 const vegAvoid = [
   ...TOWER_DEFS.map((d) => ({ x: d.x, z: d.z, r: 10.5 })),
@@ -1920,9 +1944,18 @@ function frame() {
   });
   sky.position.copy(camera.position);
   input.clearPresses();
-  composer.render();
+  if (ultraProto) {
+    ultraProto.render(dt, elapsed, state === 'title' ? camera.position : (camOverride ? camOverride.pos : player.pos));
+  } else {
+    composer.render();
+  }
   requestAnimationFrame(frame);
 }
+
+let ultraProto: {
+  render: (dt: number, elapsed: number, focusPos: THREE.Vector3) => void;
+  resize: (w: number, h: number) => void;
+} | null = null;
 
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
@@ -1939,6 +1972,7 @@ function resize() {
   sparkles.setViewport(ph, baseFov);
   dust.setViewport(ph, baseFov);
   ambientMotes.setViewport(ph, baseFov);
+  ultraProto?.resize(w, h);
 }
 window.addEventListener('resize', resize);
 resize();
@@ -2119,4 +2153,31 @@ if (import.meta.env.DEV) {
     },
   };
   window.__game = devGame;
+
+  void import('./ultra-quality.prototype').then(({ mountUltraQualityPrototype }) => {
+    ultraProto = mountUltraQualityPrototype({
+      renderer,
+      scene,
+      camera,
+      composer,
+      bloomPass,
+      sun,
+      terrain,
+      waterMesh,
+      grassField,
+      ambientMotes,
+      sky,
+      clouds,
+      aurora,
+      karstCloudSea,
+      devGame,
+      setShadowConfig,
+      getState: () => state,
+      startGame,
+      getViewerPos: () => (camOverride ? camOverride.pos : player.pos),
+      getBiomeWeights: () => (state === 'title' ? titleBiomeWeights : curBiomeWeights),
+      triggerResize: resize,
+    });
+    (window as unknown as { __ultraProto?: typeof ultraProto }).__ultraProto = ultraProto;
+  });
 }
