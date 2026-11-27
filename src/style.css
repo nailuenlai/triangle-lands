@@ -57,7 +57,7 @@ button svg { pointer-events: none; }
 }
 @keyframes exhaust-pulse { from { opacity: 0.45; } to { opacity: 0.95; } }
 
-/* POI proximity focus: cinematic vignette, peripheral glow & soft proportional framing */
+/* One-time Wonder discovery focus: brief vignette, peripheral glow & soft proportional framing */
 .poi-focus {
   --poi: 0;
   --poi-color: #ffe27a;
