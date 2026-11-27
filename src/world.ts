@@ -16,21 +16,11 @@ import {
   createWaterMaterial,
 } from './cel';
 
+import { START_POS, TOWER_DEFS, type TowerDef } from './world-layout';
+export { START_POS, TOWER_DEFS, type TowerDef };
+
 export const EXPLORE_RADIUS = 28;
 export const REVEAL_RADIUS = 150;
-export const START_POS = { x: 10, z: 70 };
-
-export interface TowerDef { name: string; x: number; z: number; }
-
-/** Hand-placed ancient shrines nestled across distinct regions of the island. */
-export const TOWER_DEFS: TowerDef[] = [
-  { name: '初始之碑', x: 0, z: -95 },
-  { name: '西嶺之碑', x: -195, z: -40 },
-  { name: '東崖之碑', x: 175, z: -140 },
-  { name: '南湖之碑', x: 150, z: 150 },
-  { name: '霧林之碑', x: -130, z: 185 },
-  { name: '北境之碑', x: -20, z: -235 },
-];
 
 export const COLORS = {
   skyTop: CEL_PALETTE.skyZenith,

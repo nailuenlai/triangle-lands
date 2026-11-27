@@ -4,7 +4,8 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import './style.css';
-import { Terrain, WATER_LEVEL, smoothstep, type Flatten } from './terrain';
+import { WATER_LEVEL, smoothstep } from './terrain';
+import { createIslandTerrain } from './world-layout';
 import {
   createSky, createTerrainMesh, createWater, createVegetation, createClouds,
   createAurora, createKarstCloudSea, BirdFlocks,
@@ -239,12 +240,7 @@ function applyDayNight(tod: number) {
 }
 applyDayNight(timeOfDay);
 
-const flats: Flatten[] = [
-  ...TOWER_DEFS.map((d) => ({ x: d.x, z: d.z, r: 13 })),
-  { ...START_POS, r: 16 },
-  ...WONDER_DEFS.map((w) => w.flat),
-];
-const terrain = new Terrain(flats);
+const terrain = createIslandTerrain();
 const sky = createSky(sunDir);
 scene.add(sky, createTerrainMesh(terrain), createWater(terrain));
 

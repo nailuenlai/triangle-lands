@@ -84,35 +84,57 @@ page.on('console', (m) => {
 });
 
 try {
-  await page.goto(targetUrl, { waitUntil: 'networkidle' });
+  await page.route('**fonts.googleapis.com**', (route) => route.abort());
+  await page.route('**fonts.gstatic.com**', (route) => route.abort());
+  await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#btn-start');
+  await page.waitForFunction(() => Boolean(window.__game), null, { polling: 100, timeout: 45_000 });
   const startBtn = page.locator('#btn-start');
   if (await startBtn.isVisible()) {
-    await startBtn.click();
-    await page.waitForTimeout(400);
+    await startBtn.dispatchEvent('click');
+    await page.waitForTimeout(300);
   }
 
   for (const shot of opts.shots) {
     await page.evaluate((s) => {
       const g = window.__game;
       if (!g) throw new Error('window.__game not found (requires Vite dev server)');
+      const tod = s.tod ?? 0.39;
       if (typeof s.camFromTower === 'number') {
         const src = g.towers[s.camFromTower];
         const dst = g.towers[s.lookTower ?? 0];
-        g.setTime(s.tod ?? 0.39);
+        g.setTime(tod);
         g.setCamOverride(
           [src.def.x, src.base + (s.camLift ?? 28), src.def.z],
           [dst.def.x, dst.base + 9, dst.def.z],
         );
       } else {
+        let x = s.x ?? 10;
+        let z = s.z ?? 70;
         let yaw = s.yaw ?? 0;
+        if (typeof s.atCourse === 'number') {
+          const c = g.courses[s.atCourse];
+          x = c.anchor.x;
+          z = c.anchor.z;
+          yaw = s.yaw ?? Math.atan2(-Math.sin(c.launchYaw), -Math.cos(c.launchYaw));
+        }
         if (typeof s.lookTower === 'number') {
           const t = g.towers[s.lookTower];
-          yaw = Math.atan2(-(t.def.x - s.x), -(t.def.z - s.z));
+          yaw = Math.atan2(-(t.def.x - x), -(t.def.z - z));
+        } else if (typeof s.lookCourse === 'number') {
+          const c = g.courses[s.lookCourse];
+          yaw = Math.atan2(-(c.anchor.x - x), -(c.anchor.z - z));
         }
-        g.snapAt(s.x, s.z, yaw, s.pitch ?? 0.16, s.tod ?? 0.39);
+        g.snapAt(x, z, yaw, s.pitch ?? 0.16, tod);
+      }
+      if (typeof s.steps === 'number' && s.steps > 0) {
+        g.stepSystems(s.steps, s.dt ?? 1 / 60);
+      }
+      if (Array.isArray(s.camPos) && Array.isArray(s.camLook)) {
+        g.setCamOverride(s.camPos, s.camLook);
       }
     }, shot);
-    await page.waitForTimeout(450);
+    await page.waitForTimeout(320);
     const outPath = path.join(opts.out, `${shot.name}.png`);
     await page.screenshot({ path: outPath });
     console.log(`Captured ${outPath}`);
