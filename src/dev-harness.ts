@@ -6,6 +6,7 @@ import type { Wonder } from './landmarks';
 import type { GameMap } from './map';
 import type { Mode, Player, WorldQuery } from './player';
 import type { Terrain } from './terrain';
+import type { QualityMode } from './ultra-quality';
 import type { Tower } from './world';
 
 export type GameState = 'title' | 'play' | 'cinematic' | 'vista' | 'map';
@@ -45,6 +46,8 @@ export interface DevGame {
   getPoiFocus: () => { focus: number; kind: PoiFocusKind };
   getFov: () => number;
   getBaseFov: () => number;
+  getQuality: () => QualityMode;
+  setQuality: (mode: QualityMode) => void;
   setYaw: (y: number) => void;
   setPitch: (p: number) => void;
   setTime: (tod: number) => void;
