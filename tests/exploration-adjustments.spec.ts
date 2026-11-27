@@ -6,8 +6,8 @@ interface DevGame {
     facing: number;
     mode: string;
   };
-  towers: { def: { x: number; z: number }; base: number }[];
-  wonders: { def: { id: string; x: number; z: number }; baseY: number }[];
+  towers: { def: { x: number; z: number }; base: number; discovered: boolean }[];
+  wonders: { def: { id: string; x: number; z: number }; baseY: number; discovered: boolean }[];
   gameMap: {
     getView: () => { zoom: number; centerX: number; centerZ: number };
     getTargetView: () => { zoom: number; centerX: number; centerZ: number };
@@ -22,6 +22,7 @@ interface DevGame {
   setYaw: (yaw: number) => void;
   openMap: () => void;
   closeMap: () => void;
+  stepDiscovery: (dt?: number) => boolean[];
   stepSystems: (n: number, dt?: number) => void;
 }
 
@@ -192,14 +193,14 @@ test.describe('Exploration UX adjustments', () => {
     expect(resetView.scale).toBe(1);
   });
 
-  test('approaching a Shrine or Wonder triggers camera zoom and focus framing', async ({ page }) => {
+  test('Wonder first-sight triggers a single brief camera zoom pulse and never repeats nearby; Shrines do not pull camera', async ({ page }) => {
     await startGame(page);
 
-    // Baseline far from any POI (open meadow around start)
+    // Baseline far from any Wonder, facing away (South)
     const baseline = await page.evaluate(() => {
       const g = (window as unknown as { __game: DevGame }).__game;
-      g.snapAt(10, 70, 0, 0.25, 0.39);
-      g.stepSystems(90, 1 / 60);
+      g.snapAt(10, 70, Math.PI, 0.25, 0.39);
+      g.stepSystems(60, 1 / 60);
       return {
         poi: g.getPoiFocus(),
         fov: g.getFov(),
@@ -210,11 +211,53 @@ test.describe('Exploration UX adjustments', () => {
     expect(baseline.poi.focus).toBeLessThan(0.05);
     expect(Math.abs(baseline.fov - baseline.baseFov)).toBeLessThan(1.5);
 
-    // Approach Shrine #0 (at x:0, z:-95) from 14m south, facing North toward it
+    // Approaching & discovering Shrine #0 (x:0, z:-95) should NOT trigger camera zoom or #poi-focus
     const nearShrine = await page.evaluate(() => {
       const g = (window as unknown as { __game: DevGame }).__game;
       g.snapAt(0, -81, 0, 0.22, 0.39);
-      g.stepSystems(90, 1 / 60);
+      g.stepDiscovery(0.3);
+      g.stepSystems(65, 1 / 60);
+      return {
+        discovered: g.towers[0].discovered,
+        poi: g.getPoiFocus(),
+        fov: g.getFov(),
+        baseFov: g.getBaseFov(),
+        cssPoi: parseFloat(getComputedStyle(document.getElementById('poi-focus')!).getPropertyValue('--poi') || '0'),
+      };
+    });
+    expect(nearShrine.discovered).toBe(true);
+    expect(nearShrine.poi.kind).toBe('none');
+    expect(nearShrine.poi.focus).toBeLessThan(0.02);
+    expect(Math.abs(nearShrine.fov - nearShrine.baseFov)).toBeLessThan(1.5);
+    expect(nearShrine.cssPoi).toBeLessThan(0.02);
+
+    // First-time sighting of Sakura Wonder (x:-36, z:22) triggers the one-time zoom & framing pulse
+    const firstSightPeak = await page.evaluate(() => {
+      const g = (window as unknown as { __game: DevGame }).__game;
+      const sakura = g.wonders.find((w) => w.def.id === 'sakura')!;
+      sakura.discovered = false;
+      g.snapAt(-36, 46, 0, 0.22, 0.39);
+      g.stepDiscovery(0.3);
+      // Step ~2.0s to the peak of the ~4.0s pulse
+      g.stepSystems(120, 1 / 60);
+      return {
+        discovered: sakura.discovered,
+        poi: g.getPoiFocus(),
+        fov: g.getFov(),
+        baseFov: g.getBaseFov(),
+        cssPoi: parseFloat(getComputedStyle(document.getElementById('poi-focus')!).getPropertyValue('--poi') || '0'),
+      };
+    });
+    expect(firstSightPeak.discovered).toBe(true);
+    expect(firstSightPeak.poi.kind).toBe('wonder');
+    expect(firstSightPeak.poi.focus).toBeGreaterThan(0.75);
+    expect(firstSightPeak.fov).toBeLessThan(firstSightPeak.baseFov - 6);
+    expect(firstSightPeak.cssPoi).toBeGreaterThan(0.75);
+
+    // After the ~4s pulse completes and settles (~6s total), emphasis returns to zero even right next to the Wonder
+    const afterPulse = await page.evaluate(() => {
+      const g = (window as unknown as { __game: DevGame }).__game;
+      g.stepSystems(240, 1 / 60);
       return {
         poi: g.getPoiFocus(),
         fov: g.getFov(),
@@ -222,24 +265,27 @@ test.describe('Exploration UX adjustments', () => {
         cssPoi: parseFloat(getComputedStyle(document.getElementById('poi-focus')!).getPropertyValue('--poi') || '0'),
       };
     });
-    expect(nearShrine.poi.kind).toBe('shrine');
-    expect(nearShrine.poi.focus).toBeGreaterThan(0.7);
-    expect(nearShrine.fov).toBeLessThan(nearShrine.baseFov - 6);
-    expect(nearShrine.cssPoi).toBeGreaterThan(0.7);
+    expect(afterPulse.poi.kind).toBe('none');
+    expect(afterPulse.poi.focus).toBe(0);
+    expect(Math.abs(afterPulse.fov - afterPulse.baseFov)).toBeLessThan(1.0);
+    expect(afterPulse.cssPoi).toBe(0);
 
-    // Approach Sakura Wonder (at x:-36, z:22) from 24m south, facing North toward it
-    const nearWonder = await page.evaluate(() => {
+    // Moving around near / re-approaching the already-discovered Wonder NEVER triggers camera pull again
+    const revisit = await page.evaluate(() => {
       const g = (window as unknown as { __game: DevGame }).__game;
-      g.snapAt(-36, 46, 0, 0.22, 0.39);
-      g.stepSystems(90, 1 / 60);
+      g.snapAt(-30, 40, 0.25, 0.2, 0.39);
+      g.stepDiscovery(0.3);
+      g.stepSystems(120, 1 / 60);
       return {
         poi: g.getPoiFocus(),
         fov: g.getFov(),
         baseFov: g.getBaseFov(),
+        cssPoi: parseFloat(getComputedStyle(document.getElementById('poi-focus')!).getPropertyValue('--poi') || '0'),
       };
     });
-    expect(nearWonder.poi.kind).toBe('wonder');
-    expect(nearWonder.poi.focus).toBeGreaterThan(0.7);
-    expect(nearWonder.fov).toBeLessThan(nearWonder.baseFov - 6);
+    expect(revisit.poi.kind).toBe('none');
+    expect(revisit.poi.focus).toBe(0);
+    expect(Math.abs(revisit.fov - revisit.baseFov)).toBeLessThan(1.0);
+    expect(revisit.cssPoi).toBe(0);
   });
 });
