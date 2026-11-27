@@ -1,44 +1,11 @@
 import { test, expect, type Page } from '@playwright/test';
 
-interface DevOrbSystem {
-  defs: { x: number; y: number; z: number; kind: string }[];
-  visibility: Float32Array;
-  hidden: boolean[];
-  collected: boolean[];
-}
-
-interface DevRing {
-  p: { x: number; y: number; z: number };
-  mesh: { visible: boolean };
-  unfold: number;
-}
-
-interface DevCourse {
-  id: number;
-  name: string;
-  anchor: { x: number; y: number; z: number };
-  start: { x: number; y: number; z: number };
-  rings: DevRing[];
-  revealed: boolean;
-  discovered: boolean;
-  done: boolean;
-  next: number;
-}
-
-interface DevGame {
-  player: { pos: { x: number; y: number; z: number } };
-  orbs: DevOrbSystem;
-  courses: DevCourse[];
-  snapAt: (x: number, z: number, yaw: number, pitch: number, tod: number) => void;
-  stepSystems: (n: number, dt?: number) => void;
-}
-
 async function startGame(page: Page) {
   await page.route('**fonts.googleapis.com**', (route) => route.abort());
   await page.route('**fonts.gstatic.com**', (route) => route.abort());
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#btn-start');
-  await page.waitForFunction(() => Boolean((window as unknown as { __game?: unknown }).__game), null, {
+  await page.waitForFunction(() => Boolean(window.__game), null, {
     polling: 100,
     timeout: 45_000,
   });
@@ -59,7 +26,7 @@ test.describe('Spirit orb proximity visibility and wind trial sequential reveal'
     await startGame(page);
 
     const report = await page.evaluate(() => {
-      const g = (window as unknown as { __game: DevGame }).__game;
+      const g = window.__game!;
       g.snapAt(10, 70, 0, 0.14, 0.39);
       g.stepSystems(2, 1 / 60);
 
@@ -92,7 +59,7 @@ test.describe('Spirit orb proximity visibility and wind trial sequential reveal'
       }
 
       // Also verify 3D distance applies identically to high sky orbs directly above an updraft
-      const skyIdx = g.orbs.defs.findIndex((d) => d.kind === 'sky' && !g.orbs.hidden[g.orbs.defs.indexOf(d)]);
+      const skyIdx = g.orbs.defs.findIndex((d, idx) => d.kind === 'sky' && !g.orbs.hidden[idx]);
       const skyDef = g.orbs.defs[skyIdx];
       // Stand directly underneath the sky orb: horizontal dist ~ 0, vertical dist ~ 45m -> mid visibility (not full 1.0)
       g.snapAt(skyDef.x, skyDef.z, 0, 0.14, 0.39);
@@ -137,7 +104,7 @@ test.describe('Spirit orb proximity visibility and wind trial sequential reveal'
     await startGame(page);
 
     const flow = await page.evaluate(() => {
-      const g = (window as unknown as { __game: DevGame }).__game;
+      const g = window.__game!;
       const c = g.courses[g.courses.length - 1]; // Nearest summit trial to start meadow
 
       // 1. From START_POS (~58m away), all trial rings and compass trial markers are hidden

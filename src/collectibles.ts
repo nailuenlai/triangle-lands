@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Terrain, SEG, HALF, WATER_LEVEL, smoothstep } from './terrain';
+import { Terrain, HALF, WATER_LEVEL, ISLAND_R, smoothstep, findPeaks, type Spot, type Peak } from './terrain';
 import { mulberry32 } from './noise';
 import { createCelMaterial } from './cel';
 import type { Particles } from './fx';
@@ -15,7 +15,7 @@ import type { Particles } from './fx';
  *    rings sequentially when approached.
  */
 
-export interface Spot { x: number; z: number; }
+export { findPeaks, type Spot, type Peak };
 export type OrbKind = 'trail' | 'peak' | 'sky' | 'cliff' | 'water' | 'field' | 'reward';
 export interface OrbDef { x: number; y: number; z: number; kind: OrbKind; }
 
@@ -23,8 +23,6 @@ export interface OrbDef { x: number; y: number; z: number; kind: OrbKind; }
 export const ORB_VISIBLE_FAR = 56;
 /** 3D distance (m) at which spirit orbs reach full clarity & glow. */
 export const ORB_VISIBLE_NEAR = 32;
-
-const ISLAND_R = 212;
 
 // ------------------------------------------------------------------ helpers
 let glowTex: THREE.Texture | null = null;
@@ -42,39 +40,6 @@ export function softGlowTexture(): THREE.Texture {
   glowTex = new THREE.CanvasTexture(cv);
   glowTex.colorSpace = THREE.SRGBColorSpace;
   return glowTex;
-}
-
-export interface Peak { x: number; z: number; h: number; }
-
-/** Local maxima of the heightfield, highest first, spaced apart. */
-export function findPeaks(terrain: Terrain, minH: number, sep: number, avoid: Spot[], avoidR: number): Peak[] {
-  const N = SEG + 1;
-  const H = terrain.heights;
-  const R = 4;
-  const found: Peak[] = [];
-  for (let j = R; j < N - R; j++) {
-    for (let i = R; i < N - R; i++) {
-      const h = H[j * N + i];
-      if (h < minH) continue;
-      let isMax = true;
-      for (let b = -R; b <= R && isMax; b++) {
-        for (let a = -R; a <= R; a++) {
-          if ((a || b) && H[(j + b) * N + i + a] > h) { isMax = false; break; }
-        }
-      }
-      if (!isMax) continue;
-      const x = -HALF + i * terrain.step, z = -HALF + j * terrain.step;
-      if (Math.hypot(x, z) > ISLAND_R) continue;
-      if (avoid.some((s) => Math.hypot(s.x - x, s.z - z) < avoidR)) continue;
-      found.push({ x, z, h });
-    }
-  }
-  found.sort((a, b) => b.h - a.h);
-  const out: Peak[] = [];
-  for (const p of found) {
-    if (out.every((o) => Math.hypot(o.x - p.x, o.z - p.z) > sep)) out.push(p);
-  }
-  return out;
 }
 
 function gradMag(terrain: Terrain, x: number, z: number): [number, number, number] {

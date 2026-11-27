@@ -41,7 +41,7 @@ export class Terrain {
   private n5 = new Simplex2(109);
   private wTmp = new Float32Array(BIOME_COUNT);
 
-  constructor(flats: Flatten[]) {
+  constructor(flats: Flatten[] = []) {
     const N = SEG + 1;
     this.heights = new Float32Array(N * N);
     this.biomeWeights = new Float32Array(N * N * BIOME_COUNT);
@@ -199,4 +199,46 @@ export class Terrain {
     const gz = (this.height(x, z + e) - this.height(x, z - e)) / (2 * e);
     return 1 / Math.sqrt(1 + gx * gx + gz * gz);
   }
+}
+
+export const ISLAND_R = 212;
+export interface Spot { x: number; z: number; }
+export interface Peak { x: number; z: number; h: number; }
+
+/** Local maxima of the heightfield, highest first, spaced apart. */
+export function findPeaks(
+  terrain: Terrain,
+  minH: number,
+  sep: number,
+  avoid: readonly Spot[] = [],
+  avoidR = 0,
+): Peak[] {
+  const N = SEG + 1;
+  const H = terrain.heights;
+  const R = 4;
+  const found: Peak[] = [];
+  for (let j = R; j < N - R; j++) {
+    for (let i = R; i < N - R; i++) {
+      const h = H[j * N + i];
+      if (h < minH) continue;
+      let isMax = true;
+      for (let b = -R; b <= R && isMax; b++) {
+        for (let a = -R; a <= R; a++) {
+          if ((a || b) && H[(j + b) * N + i + a] > h) { isMax = false; break; }
+        }
+      }
+      if (!isMax) continue;
+      const x = -HALF + i * terrain.step;
+      const z = -HALF + j * terrain.step;
+      if (Math.hypot(x, z) > ISLAND_R) continue;
+      if (avoid.some((s) => Math.hypot(s.x - x, s.z - z) < avoidR)) continue;
+      found.push({ x, z, h });
+    }
+  }
+  found.sort((a, b) => b.h - a.h);
+  const out: Peak[] = [];
+  for (const p of found) {
+    if (out.every((o) => Math.hypot(o.x - p.x, o.z - p.z) > sep)) out.push(p);
+  }
+  return out;
 }

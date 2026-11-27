@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const SRC_DIR = path.resolve(process.cwd(), 'src');
-const PURE_MATH_FILES = new Set(['noise.ts', 'biome-field.ts', 'terrain.ts']);
+const PURE_MATH_FILES = new Set(['noise.ts', 'biome-field.ts', 'terrain.ts', 'world-layout.ts']);
 
 const failures = [];
 

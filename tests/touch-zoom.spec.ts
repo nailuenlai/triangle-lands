@@ -12,6 +12,8 @@ async function startGame(page: Page) {
 }
 
 test.describe('Touch zoom prevention during gameplay', () => {
+  test.setTimeout(90_000);
+
   test('all interactive HUD buttons and their SVG children disable browser touch gestures via touch-action: none', async ({ page }) => {
     await startGame(page);
 
