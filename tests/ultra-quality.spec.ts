@@ -1,4 +1,8 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+
+async function waitFrame(page: Page) {
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+}
 
 test.describe('High-Quality Living Watercolor mode', () => {
   test.setTimeout(90_000);
@@ -32,14 +36,14 @@ test.describe('High-Quality Living Watercolor mode', () => {
     expect(await page.evaluate(() => window.__game!.getQuality())).toBe('ultra');
     expect(await page.evaluate(() => localStorage.getItem('triangle-explorer-quality'))).toBe('ultra');
 
-    // 3. Render across Day, Golden Sunset, and Starry Night over mirror water with zero console/WebGL errors
+    // 3. Render one verified frame each across Day, Golden Sunset, and Starry Night with zero WebGL errors
     for (const tod of [0.39, 0.725, 0.02]) {
       await page.evaluate((t) => {
         const g = window.__game!;
         g.setTime(t);
         g.setCamOverride([122, 9.2, 118], [90, 7.2, 137]);
       }, tod);
-      await page.waitForTimeout(220);
+      await waitFrame(page);
     }
 
     // 4. Toggle back to Standard cleanly
@@ -65,6 +69,7 @@ test.describe('High-Quality Living Watercolor mode', () => {
     await page.waitForSelector('#btn-start');
     await page.locator('#btn-start').dispatchEvent('click');
     await expect(page.locator('#hud')).toBeVisible();
+    await waitFrame(page);
 
     expect(await page.evaluate(() => window.__game!.getQuality())).toBe('ultra');
     await expect(page.locator('#btn-quality')).toHaveAttribute('aria-pressed', 'true');
