@@ -20,6 +20,7 @@ import { createWilds, RingCourse, type Updraft, type CourseEvent } from './colle
 import { updateCelTime, updateDayNight, updateBiomeAtmosphere, celUniforms, DAY_PRESETS } from './cel';
 import { BIOMES, BIOME_COUNT, sampleBiomeWeights, sampleDominantBiome } from './biomes';
 import { WONDER_DEFS, MOMENT_DEFS, Wonder } from './landmarks';
+import { UltraQualityPipeline, type QualityMode } from './ultra-quality';
 import type { DevGame, GameState, PoiFocusKind } from './dev-harness';
 
 // ------------------------------------------------------------ DOM
@@ -42,6 +43,9 @@ const iconLeap = $('icon-leap');
 const btnSprint = $('btn-sprint');
 const iconSprint = $('icon-sprint');
 const iconDive = $('icon-dive');
+const btnQuality = $('btn-quality');
+const iconQualityStd = $('icon-quality-std');
+const iconQualityUltra = $('icon-quality-ultra');
 const btnTime = $('btn-time');
 const timeIcons = {
   morning: $('icon-time-morning'),
@@ -103,6 +107,7 @@ const orbSegEls: SVGPathElement[] = [];
 // ------------------------------------------------------------ Save & Settings
 const SAVE_KEY = 'triangle-explorer-v2';
 const MUTE_KEY = 'triangle-explorer-muted';
+const QUALITY_KEY = 'triangle-explorer-quality';
 interface SaveData {
   discovered: number[];
   activated: number[];
@@ -185,12 +190,12 @@ scene.add(hemi);
 const sun = new THREE.DirectionalLight('#fff3db', 2.4);
 sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
-const SHADOW_RANGE = 62;
-const SHADOW_TEXEL = (SHADOW_RANGE * 2) / 1024;
-sun.shadow.camera.left = -SHADOW_RANGE;
-sun.shadow.camera.right = SHADOW_RANGE;
-sun.shadow.camera.top = SHADOW_RANGE;
-sun.shadow.camera.bottom = -SHADOW_RANGE;
+let shadowRange = 62;
+let shadowTexel = (shadowRange * 2) / 1024;
+sun.shadow.camera.left = -shadowRange;
+sun.shadow.camera.right = shadowRange;
+sun.shadow.camera.top = shadowRange;
+sun.shadow.camera.bottom = -shadowRange;
 sun.shadow.camera.near = 10;
 sun.shadow.camera.far = 260;
 sun.shadow.bias = -0.00045;
@@ -198,11 +203,34 @@ sun.shadow.normalBias = 0.08;
 sun.position.copy(sunDir).multiplyScalar(120);
 scene.add(sun, sun.target);
 
+function setShadowConfig(size: number, range: number, soft: boolean) {
+  shadowRange = range;
+  shadowTexel = (range * 2) / size;
+  sun.shadow.camera.left = -range;
+  sun.shadow.camera.right = range;
+  sun.shadow.camera.top = range;
+  sun.shadow.camera.bottom = -range;
+  sun.shadow.camera.far = Math.max(260, range * 2.8);
+  sun.shadow.camera.updateProjectionMatrix();
+  if (sun.shadow.mapSize.width !== size || sun.shadow.mapSize.height !== size) {
+    sun.shadow.mapSize.set(size, size);
+    if (sun.shadow.map) {
+      sun.shadow.map.dispose();
+      sun.shadow.map = null;
+    }
+  }
+  const nextType = soft ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+  if (renderer.shadowMap.type !== nextType) {
+    renderer.shadowMap.type = nextType;
+    renderer.shadowMap.needsUpdate = true;
+  }
+}
+
 const shadowFocus = new THREE.Vector3();
 function updateSunShadow(fx: number, fy: number, fz: number) {
   // Texel-snap to prevent shadow edge shimmer during movement
-  const sx = Math.round(fx / SHADOW_TEXEL) * SHADOW_TEXEL;
-  const sz = Math.round(fz / SHADOW_TEXEL) * SHADOW_TEXEL;
+  const sx = Math.round(fx / shadowTexel) * shadowTexel;
+  const sz = Math.round(fz / shadowTexel) * shadowTexel;
   shadowFocus.set(sx, fy, sz);
   sun.target.position.copy(shadowFocus);
   sun.position.copy(shadowFocus).addScaledVector(sunDir, 125);
@@ -242,7 +270,8 @@ applyDayNight(timeOfDay);
 
 const terrain = createIslandTerrain();
 const sky = createSky(sunDir);
-scene.add(sky, createTerrainMesh(terrain), createWater(terrain));
+const waterMesh = createWater(terrain);
+scene.add(sky, createTerrainMesh(terrain), waterMesh);
 
 const vegAvoid = [
   ...TOWER_DEFS.map((d) => ({ x: d.x, z: d.z, r: 10.5 })),
@@ -487,6 +516,10 @@ function cycleTimeOfDay() {
   syncTimeIcon(preset.phase);
   audio.playTimeShift(preset.phase);
 }
+input.bindButton(btnQuality, () => {
+  audio.unlock();
+  toggleQualityMode();
+});
 input.bindButton(btnTime, () => {
   audio.unlock();
   if (state === 'play' || state === 'vista') cycleTimeOfDay();
@@ -1920,13 +1953,70 @@ function frame() {
   });
   sky.position.copy(camera.position);
   input.clearPresses();
-  composer.render();
+  ultraQuality.render(state === 'title' ? camera.position : (camOverride ? camOverride.pos : player.pos));
   requestAnimationFrame(frame);
+}
+
+const ultraQuality = new UltraQualityPipeline({
+  renderer,
+  scene,
+  camera,
+  composer,
+  bloomPass,
+  terrain,
+  waterMesh,
+  grassField,
+  ambientMotes,
+  sky,
+  clouds,
+  aurora,
+  karstCloudSea,
+  setShadowConfig,
+  isTitleState: () => state === 'title',
+  getBiomeWeights: () => (state === 'title' ? titleBiomeWeights : curBiomeWeights),
+});
+
+function syncQualityUI(animate = false) {
+  const isUltra = ultraQuality.isUltra();
+  btnQuality.classList.toggle('ultra-on', isUltra);
+  btnQuality.setAttribute('aria-pressed', isUltra ? 'true' : 'false');
+  iconQualityStd.toggleAttribute('hidden', isUltra);
+  iconQualityUltra.toggleAttribute('hidden', !isUltra);
+  if (animate) {
+    btnQuality.classList.remove('spin');
+    void btnQuality.offsetWidth;
+    btnQuality.classList.add('spin');
+  }
+}
+
+function setQualityMode(mode: QualityMode, persist = true, animate = false) {
+  ultraQuality.setMode(mode);
+  if (persist) {
+    try { localStorage.setItem(QUALITY_KEY, mode); } catch { /* ignore storage restrictions */ }
+  }
+  syncQualityUI(animate);
+  resize();
+}
+
+function toggleQualityMode() {
+  const next: QualityMode = ultraQuality.isUltra() ? 'standard' : 'ultra';
+  setQualityMode(next, true, true);
+}
+
+function resolveInitialQuality(): QualityMode {
+  const qParam = new URLSearchParams(window.location.search).get('quality');
+  if (qParam === 'ultra' || qParam === 'standard') return qParam;
+  try {
+    return localStorage.getItem(QUALITY_KEY) === 'ultra' ? 'ultra' : 'standard';
+  } catch {
+    return 'standard';
+  }
 }
 
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
-  const pr = renderer.getPixelRatio();
+  const pr = Math.min(window.devicePixelRatio || 1, ultraQuality.getDprCap());
+  renderer.setPixelRatio(pr);
   renderer.setSize(w, h, false);
   composer.setPixelRatio(pr);
   composer.setSize(w, h);
@@ -1939,9 +2029,10 @@ function resize() {
   sparkles.setViewport(ph, baseFov);
   dust.setViewport(ph, baseFov);
   ambientMotes.setViewport(ph, baseFov);
+  ultraQuality.resize(w, h, pr, baseFov);
 }
 window.addEventListener('resize', resize);
-resize();
+setQualityMode(resolveInitialQuality(), false, false);
 
 // ------------------------------------------------------------ Title
 const existingSave = loadSave();
@@ -2028,6 +2119,8 @@ window.addEventListener('keydown', (e) => {
   if (state !== 'title') audio.unlock();
   if (e.code === 'KeyT' && !e.repeat && (state === 'play' || state === 'vista')) {
     cycleTimeOfDay();
+  } else if (e.code === 'KeyQ' && !e.repeat && (state === 'play' || state === 'vista')) {
+    toggleQualityMode();
   } else if (e.code === 'Escape' && state === 'map') {
     closeMap();
   }
@@ -2042,6 +2135,8 @@ if (import.meta.env.DEV) {
     getPoiFocus: () => ({ focus: poiFocus, kind: poiKind }),
     getFov: () => camera.fov,
     getBaseFov: () => baseFov,
+    getQuality: () => ultraQuality.getMode(),
+    setQuality: (mode: QualityMode) => setQualityMode(mode, false, false),
     setYaw: (y: number) => { camYaw = y; },
     setPitch: (p: number) => { camPitch = p; },
     setTime: (tod: number) => { timeGlide = null; timeOfDay = ((tod % 1) + 1) % 1; applyDayNight(timeOfDay); },

@@ -292,13 +292,28 @@ button svg { pointer-events: none; }
 
 .hud-right { display: flex; align-items: center; gap: 8px; }
 @media (max-width: 440px) {
-  .hud-top .pill { padding: 0 10px; }
-  .hud-top .orb-count { padding-left: 7px; }
+  .hud-top { gap: 6px; padding: max(12px, env(safe-area-inset-top)) 10px 0; }
+  .hud-top .pill { height: 38px; padding: 0 9px; }
+  .hud-top .orb-count { padding-left: 6px; }
   .hud-top .pill .of { display: none; }
+  .hud-right { gap: 5px; }
+  .hud-right .icon-btn { width: 36px; height: 36px; padding: 0; }
+  .hud-right .icon-btn svg { width: 18px; height: 18px; }
 }
-.icon-btn { padding: 0; width: 44px; transition: transform 0.15s ease, background 0.2s, opacity 0.2s, box-shadow 0.25s; }
+.icon-btn { padding: 0; width: 44px; transition: transform 0.15s ease, background 0.2s, opacity 0.2s, box-shadow 0.25s, color 0.25s; }
 .icon-btn:active { transform: scale(0.92); }
 .icon-btn.muted { opacity: 0.56; }
+#btn-quality #icon-quality-ultra { display: none; }
+#btn-quality.ultra-on #icon-quality-std { display: none; }
+#btn-quality.ultra-on #icon-quality-ultra { display: block; }
+.icon-btn.ultra-on {
+  color: #ffe28a;
+  background: rgba(54, 46, 26, 0.52);
+  box-shadow: inset 0 0 0 1.25px rgba(255, 218, 120, 0.72), 0 0 14px rgba(255, 208, 115, 0.42);
+}
+.icon-btn.ultra-on svg {
+  filter: drop-shadow(0 0 5px rgba(255, 216, 118, 0.78));
+}
 .icon-btn.spin svg { animation: icon-spin 0.48s cubic-bezier(.2, .9, .3, 1.15); }
 @keyframes icon-spin {
   0% { transform: scale(0.75) rotate(-55deg); opacity: 0.3; }
